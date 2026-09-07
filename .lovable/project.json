@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "template": "tanstack_start_ts_current",
+  "revision": "tanstack_start_ts_current-571d16f7cb10"
+}
+
+{
+  "name": "vessel-sentinel-app",
+  "version": "1.0.0",
+  "port": 8000
+}

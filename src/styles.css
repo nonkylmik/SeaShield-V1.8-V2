@@ -1,0 +1,222 @@
+@import "tailwindcss" source(none);
+@source "../src";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * SeaShield design system — maritime security operations console.
+ * Dark-only, navy/charcoal foundation with cyan/blue signal accents.
+ * All colors are oklch semantic tokens. Never hardcode colors in components.
+ */
+
+@theme inline {
+  --font-sans:
+    "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
+
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 2px);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-ring-offset-background: var(--background);
+
+  /* operations surfaces */
+  --color-panel: var(--panel);
+  --color-panel-header: var(--panel-header);
+  --color-grid-line: var(--grid-line);
+
+  /* status signals */
+  --color-secure: var(--secure);
+  --color-secure-foreground: var(--secure-foreground);
+  --color-caution: var(--caution);
+  --color-caution-foreground: var(--caution-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-critical: var(--critical);
+  --color-critical-foreground: var(--critical-foreground);
+  --color-offline: var(--offline);
+  --color-signal: var(--signal);
+  --color-signal-foreground: var(--signal-foreground);
+
+  --color-chart-1: var(--signal);
+  --color-chart-2: var(--secure);
+  --color-chart-3: var(--caution);
+  --color-chart-4: var(--critical);
+  --color-chart-5: var(--muted-foreground);
+
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  --shadow-panel: 0 1px 0 0 oklch(1 0 0 / 4%) inset, 0 8px 24px -12px oklch(0 0 0 / 60%);
+  --animate-pulse-signal: pulse-signal 2s ease-in-out infinite;
+  --animate-scan: scan 4.5s linear infinite;
+  --animate-blip: blip 1.6s ease-out infinite;
+}
+
+:root {
+  --radius: 0.25rem;
+
+  --background: oklch(0.17 0.026 251);
+  --foreground: oklch(0.94 0.008 240);
+
+  --panel: oklch(0.212 0.028 252);
+  --panel-header: oklch(0.246 0.03 252);
+  --grid-line: oklch(0.32 0.03 250 / 45%);
+
+  --card: oklch(0.212 0.028 252);
+  --card-foreground: oklch(0.94 0.008 240);
+  --popover: oklch(0.226 0.029 252);
+  --popover-foreground: oklch(0.94 0.008 240);
+
+  --primary: oklch(0.72 0.14 220);
+  --primary-foreground: oklch(0.16 0.03 250);
+  --secondary: oklch(0.27 0.03 252);
+  --secondary-foreground: oklch(0.9 0.01 240);
+  --muted: oklch(0.25 0.028 252);
+  --muted-foreground: oklch(0.66 0.024 246);
+  --accent: oklch(0.3 0.04 245);
+  --accent-foreground: oklch(0.95 0.008 240);
+
+  --destructive: oklch(0.58 0.2 22);
+  --destructive-foreground: oklch(0.97 0.01 240);
+
+  --border: oklch(0.31 0.028 250);
+  --input: oklch(0.29 0.028 250);
+  --ring: oklch(0.72 0.14 220);
+
+  --signal: oklch(0.78 0.13 205);
+  --signal-foreground: oklch(0.16 0.03 250);
+  --secure: oklch(0.72 0.15 165);
+  --secure-foreground: oklch(0.16 0.03 250);
+  --caution: oklch(0.8 0.14 85);
+  --caution-foreground: oklch(0.16 0.03 250);
+  --warning: oklch(0.72 0.16 55);
+  --warning-foreground: oklch(0.16 0.03 250);
+  --critical: oklch(0.62 0.21 20);
+  --critical-foreground: oklch(0.97 0.01 240);
+  --offline: oklch(0.48 0.02 250);
+
+  --sidebar: oklch(0.196 0.027 252);
+  --sidebar-foreground: oklch(0.82 0.014 244);
+  --sidebar-primary: oklch(0.78 0.13 205);
+  --sidebar-primary-foreground: oklch(0.16 0.03 250);
+  --sidebar-accent: oklch(0.26 0.032 250);
+  --sidebar-accent-foreground: oklch(0.96 0.008 240);
+  --sidebar-border: oklch(0.28 0.028 250);
+  --sidebar-ring: oklch(0.78 0.13 205);
+}
+
+@keyframes pulse-signal {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@keyframes scan {
+  0% {
+    transform: translateY(-10%);
+  }
+  100% {
+    transform: translateY(1100%);
+  }
+}
+
+@keyframes blip {
+  0% {
+    transform: scale(0.4);
+    opacity: 0.8;
+  }
+  100% {
+    transform: scale(2.4);
+    opacity: 0;
+  }
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+
+  html,
+  body {
+    height: 100%;
+  }
+
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    font-feature-settings: "cv05", "ss01";
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: var(--background);
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border: 2px solid var(--background);
+    border-radius: 999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--muted-foreground);
+  }
+}
+
+@utility label-mono {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  line-height: 1rem;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+
+@utility tabular {
+  font-variant-numeric: tabular-nums;
+  font-family: var(--font-mono);
+}
+
+@utility grid-backdrop {
+  background-image:
+    linear-gradient(to right, var(--grid-line) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
