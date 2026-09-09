@@ -16,7 +16,7 @@ V2 hydrates vessels, cameras, events, incidents, simulation actions, and WebSock
 
 SeaShield — Native Application Prototype
 
-Build a professional desktop application prototype called SeaShield.
+Building/developing a professional desktop application prototype called SeaShield.
 
 SeaShield is intended to become a dedicated maritime security application for commercial cargo vessels and shipping companies.
 
@@ -92,29 +92,23 @@ Later, they will communicate with a Python/FastAPI backend.
 
 Technology for Prototype V1
 
-Use:
+Used:
 
-React
+React,
 
-TypeScript
+TypeScript,
 
-JavaScript
+JavaScript,
 
-Tailwind CSS
+Tailwind CSS,
 
-Component-based architecture
+Component-based architecture,
 
-React Router where appropriate
+React Router where appropriate,
 
 Mock data/services for V1
 
 Structure the project so it can later be packaged as a desktop application, for example using an appropriate desktop wrapper such as Electron or Tauri.
-
-Do not build the Python backend yet.
-
-Do not build real cybersecurity functionality yet.
-
-Do not connect to real hardware.
 
 Desktop application experience
 
@@ -142,15 +136,13 @@ Incident investigation
 
 Fleet monitoring
 
-Avoid designing it like a marketing website.
-
 There should be no landing page, pricing page, blog, marketing sections or website-style navigation.
 
 The user should launch SeaShield and immediately enter the security operations environment.
 
 Visual design
 
-Use a professional maritime security / cybersecurity operations aesthetic.
+IT has professional maritime security / cybersecurity operations aesthetic.
 
 Style:
 
@@ -182,11 +174,9 @@ maritime operations software
 
 enterprise security software
 
-It should NOT look like a generic SaaS dashboard.
-
 Main application navigation
 
-Create a persistent application sidebar:
+Application sidebar:
 
 Dashboard
 
@@ -228,7 +218,7 @@ Implement the previously specified SeaShield functionality:
 
 Dashboard
 
-Show:
+Shows:
 
 Fleet security status
 
@@ -304,7 +294,7 @@ Stern
 
 Entrance
 
-These must be clearly simulated/placeholder feeds.
+These are clearly simulated/placeholder feeds.
 
 Cybersecurity
 
@@ -362,7 +352,7 @@ Bilge
 
 Access Control
 
-Simulate:
+Simulates:
 
 Authorized access
 
@@ -374,7 +364,7 @@ Restricted areas
 
 Reports
 
-Show:
+Shows:
 
 Security events
 
@@ -431,15 +421,13 @@ HIGH severity incident
 Operator notification
 
 
-Implement basic rule-based event correlation.
-
-Do NOT claim that this is real AI or real threat detection.
+Implemented basic rule-based event correlation.
 
 Future backend compatibility
 
-Keep all mock data and service calls separated from the UI.
+Keeps all mock data and service calls separated from the UI.
 
-Use service abstractions such as:
+Uses service abstractions such as:
 
 vesselService
 cameraService
@@ -460,8 +448,6 @@ FastAPI
 PostgreSQL
 
 
-The React desktop interface should not need to be completely rewritten when the backend is introduced.
-
 Prototype goal
 
 The objective is to create a convincing desktop prototype of a maritime security command application.
@@ -472,17 +458,10 @@ Physical Security + Cybersecurity + Incident Management + Vessel Monitoring
 
 The application must feel like a real security product, while all data and security activity remain simulated during Prototype V1.
 
-Do not attempt to implement real vessel control, real cyber attacks, real network intrusion capabilities, real CCTV streaming or real ship-system integration.
+The attempt does not implement real vessel control, real cyber attacks, real network intrusion capabilities, real CCTV streaming or real ship-system integration.
 
-This project was built with [Lovable](https://lovable.dev).
+This project was built partially as a design with  [Lovable](https://lovable.dev).
 
-## Build with Lovable
-
-Continue developing this project in the [Lovable editor](https://lovable.dev/projects/5d4296d6-ca1f-42cc-a1f7-0bb86a04894b).
-
-- **Ship faster**: describe what you want to build and Lovable handles the code.
-- **Stay in sync**: every change made in Lovable is committed straight to this repository.
-- **Full ownership**: this code is yours. Push to `main` on GitHub and your changes sync back into Lovable, ready for your next prompt.
 
 ## Development
 
