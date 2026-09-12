@@ -94,3 +94,63 @@ class SimulationRunRecord(Base):
     end_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     status: Mapped[str] = mapped_column(String(30), default="RUNNING", index=True)
     run_metadata: Mapped[dict[str, Any]] = mapped_column("metadata", JSON().with_variant(JSONB, "postgresql"), default=dict)
+
+
+class SafetyRoundRecord(Base):
+    __tablename__ = "safety_rounds"
+    __table_args__ = {"extend_existing": True}
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    round_id: Mapped[str] = mapped_column(String(100), unique=True, index=True)
+    vessel_id: Mapped[str] = mapped_column(String(100), index=True)
+    round_type: Mapped[str] = mapped_column(String(120), index=True)
+    status: Mapped[str] = mapped_column(String(30), default="PLANNED", index=True)
+    assigned_to: Mapped[str] = mapped_column(String(160), default="", index=True)
+    planned_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    notes: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+
+class SafetyCheckpointRecord(Base):
+    __tablename__ = "safety_checkpoints"
+    __table_args__ = {"extend_existing": True}
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    checkpoint_id: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+    round_id: Mapped[str] = mapped_column(String(100), ForeignKey("safety_rounds.round_id"), index=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    category: Mapped[str] = mapped_column(String(80), default="General")
+    location: Mapped[str] = mapped_column(String(200), default="")
+    description: Mapped[str] = mapped_column(Text, default="")
+    sequence: Mapped[int] = mapped_column(Integer, default=0, index=True)
+    required: Mapped[bool] = mapped_column(default=True, index=True)
+    status: Mapped[str] = mapped_column(String(30), default="NOT_CHECKED", index=True)
+    severity: Mapped[str] = mapped_column(String(20), default="INFO", index=True)
+    notes: Mapped[str] = mapped_column(Text, default="")
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_by: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+
+class SafetyFindingRecord(Base):
+    __tablename__ = "safety_findings"
+    __table_args__ = {"extend_existing": True}
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    finding_id: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+    round_id: Mapped[str] = mapped_column(String(100), ForeignKey("safety_rounds.round_id"), index=True)
+    checkpoint_id: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    vessel_id: Mapped[str] = mapped_column(String(100), index=True)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    description: Mapped[str] = mapped_column(Text, default="")
+    location: Mapped[str] = mapped_column(String(200), default="")
+    severity: Mapped[str] = mapped_column(String(20), default="LOW", index=True)
+    status: Mapped[str] = mapped_column(String(30), default="OPEN", index=True)
+    created_by: Mapped[str] = mapped_column(String(160), default="")
+    assigned_to: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    due_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    resolution_notes: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
