@@ -26,7 +26,7 @@ The primary target is a desktop security operations application used by security
 
 The application should eventually be capable of operating alongside a local vessel/edge server and communicating with a central backend.
 
-Product concept
+Product concept:
 
 SeaShield combines physical and cybersecurity monitoring for commercial vessels.
 
@@ -60,7 +60,7 @@ Do NOT connect to real vessels, cameras, networks or security infrastructure yet
 
 Application architecture
 
-Design the project around this future architecture:
+Designing the project around this future architecture:
 
                 SEASHIELD DESKTOP APP
                          │
@@ -108,7 +108,7 @@ React Router where appropriate,
 
 Mock data/services for V1
 
-Structure the project so it can later be packaged as a desktop application, for example using an appropriate desktop wrapper such as Electron or Tauri.
+The project will be structured, so it can later be packaged as a desktop application, for example using an appropriate desktop wrapper such as Electron or Tauri.
 
 Desktop application experience
 
@@ -214,7 +214,7 @@ User profile
 
 Prototype functionality
 
-Implement the previously specified SeaShield functionality:
+Implementing the previously specified SeaShield functionality:
 
 Dashboard
 
@@ -276,7 +276,7 @@ Security score
 
 CCTV
 
-Create simulated camera feeds for:
+Created simulated camera feeds for:
 
 Bridge
 
@@ -298,7 +298,7 @@ These are clearly simulated/placeholder feeds.
 
 Cybersecurity
 
-Show simulated:
+Shows simulated:
 
 Unknown devices
 
@@ -314,7 +314,7 @@ Security events
 
 Incidents
 
-Implement:
+Implements:
 
 Incident creation
 
@@ -334,7 +334,7 @@ Operator assignment
 
 Sensors
 
-Simulate:
+Simulates:
 
 Fire
 
@@ -382,7 +382,7 @@ Security simulation
 
 Implement a Prototype V1 simulation engine.
 
-Allow the operator to manually trigger:
+Allows the operator to manually trigger:
 
 Camera failure
 
@@ -460,7 +460,7 @@ The application must feel like a real security product, while all data and secur
 
 The attempt does not implement real vessel control, real cyber attacks, real network intrusion capabilities, real CCTV streaming or real ship-system integration.
 
-This project was built partially as a design with  [Lovable](https://lovable.dev).
+This project was built partially as in design with  [Lovable](https://lovable.dev).
 
 
 ## Development
