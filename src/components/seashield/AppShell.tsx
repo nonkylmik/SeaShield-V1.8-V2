@@ -4,11 +4,13 @@ import {
   AlertTriangle,
   Bell,
   Camera,
+  ClipboardCheck,
   Cpu,
   FileBarChart,
   Gauge,
   KeyRound,
   LayoutDashboard,
+  LogOut,
   Radar,
   Search,
   Settings,
@@ -22,7 +24,15 @@ import { useSeaShield, useTelemetryClock } from "@/lib/seashield/useSeaShield";
 import { securityService, vesselService } from "@/lib/seashield/services";
 import { utcTime, stateColor, severityText } from "@/lib/seashield/format";
 import { StatusDot } from "./primitives";
-import { connectSeaShieldBackend } from "@/lib/seashield/backend";
+import {
+  connectSeaShieldBackend,
+  loginBackend,
+  logoutBackend,
+  readBackendAuth,
+} from "@/lib/seashield/backend";
+import { LoginScreen } from "./LoginScreen";
+
+type AuthState = { required: boolean; authenticated: boolean };
 
 const NAV = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, key: "F1" },
@@ -31,26 +41,63 @@ const NAV = [
   { to: "/cameras", label: "Cameras", icon: Camera, key: "F4" },
   { to: "/cybersecurity", label: "Cybersecurity", icon: ShieldHalf, key: "F5" },
   { to: "/incidents", label: "Incidents", icon: AlertTriangle, key: "F6" },
-  { to: "/sensors", label: "Sensors", icon: Gauge, key: "F7" },
-  { to: "/access-control", label: "Access Control", icon: KeyRound, key: "F8" },
-  { to: "/reports", label: "Reports", icon: FileBarChart, key: "F9" },
-  { to: "/settings", label: "Settings", icon: Settings, key: "F10" },
+  { to: "/safety-rounds", label: "Safety Rounds", icon: ClipboardCheck, key: "F7" },
+  { to: "/sensors", label: "Sensors", icon: Gauge, key: "F8" },
+  { to: "/access-control", label: "Access Control", icon: KeyRound, key: "F9" },
+  { to: "/reports", label: "Reports", icon: FileBarChart, key: "F10" },
+  { to: "/settings", label: "Settings", icon: Settings, key: "F11" },
 ] as const;
 
 export function AppShell({ children }: { children: ReactNode }) {
   useTelemetryClock();
-  useEffect(() => connectSeaShieldBackend(), []);
+  const [auth, setAuth] = useState<AuthState | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void readBackendAuth()
+      .then((state) => {
+        if (!cancelled) setAuth(state);
+      })
+      .catch(() => {
+        if (!cancelled) setAuth({ required: false, authenticated: true });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  useEffect(() => {
+    if (!auth?.authenticated) return;
+    return connectSeaShieldBackend();
+  }, [auth?.authenticated]);
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+
+  if (auth?.required && !auth.authenticated) {
+    return (
+      <LoginScreen
+        onLogin={async (email, password) => {
+          await loginBackend(email, password);
+          setAuth({ required: true, authenticated: true });
+        }}
+      />
+    );
+  }
 
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-background">
-      <TopBar />
+      <TopBar
+        onSignOut={
+          auth?.required
+            ? async () => {
+                await logoutBackend();
+                setAuth({ required: true, authenticated: false });
+              }
+            : undefined
+        }
+      />
       <div className="flex min-h-0 flex-1">
         <nav className="flex w-[13.5rem] shrink-0 flex-col border-r border-sidebar-border bg-sidebar">
           <div className="flex-1 overflow-auto py-2">
             {NAV.map((item) => {
-              const active =
-                item.to === "/" ? pathname === "/" : pathname.startsWith(item.to);
+              const active = item.to === "/" ? pathname === "/" : pathname.startsWith(item.to);
               return (
                 <Link
                   key={item.to}
@@ -63,7 +110,10 @@ export function AppShell({ children }: { children: ReactNode }) {
                   )}
                 >
                   <item.icon
-                    className={cn("size-4 shrink-0", active ? "text-sidebar-primary" : "text-muted-foreground")}
+                    className={cn(
+                      "size-4 shrink-0",
+                      active ? "text-sidebar-primary" : "text-muted-foreground",
+                    )}
                   />
                   <span className="flex-1 truncate">{item.label}</span>
                   <span className="tabular text-[10px] text-muted-foreground opacity-0 group-hover:opacity-100">
@@ -82,7 +132,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   );
 }
 
-function TopBar() {
+function TopBar({ onSignOut }: { onSignOut?: () => Promise<void> }) {
   const vessels = useSeaShield((s) => s.vessels);
   const selected = useSeaShield((s) => s.selectedVesselId);
   const notifications = useSeaShield((s) => s.notifications);
@@ -154,7 +204,9 @@ function TopBar() {
                       <span className={cn("text-xs font-semibold", severityText[n.severity])}>
                         {n.title}
                       </span>
-                      <span className="tabular text-[10px] text-muted-foreground">{utcTime(n.ts)}</span>
+                      <span className="tabular text-[10px] text-muted-foreground">
+                        {utcTime(n.ts)}
+                      </span>
                     </div>
                     <p className="mt-0.5 text-xs text-muted-foreground">{n.body}</p>
                   </li>
@@ -166,13 +218,28 @@ function TopBar() {
 
         <div className="flex items-center gap-2 border-l border-border pl-3">
           <div className="flex size-7 items-center justify-center rounded-sm bg-secondary font-mono text-[11px]">
-            RV
+            {operator.name
+              .split(/\s+/)
+              .map((part) => part[0])
+              .join("")
+              .slice(0, 2)
+              .toUpperCase()}
           </div>
           <div className="hidden leading-tight xl:block">
             <div className="text-xs font-medium">{operator.name}</div>
             <div className="label-mono text-[9px] normal-case">{operator.role}</div>
           </div>
         </div>
+        {onSignOut ? (
+          <button
+            onClick={() => void onSignOut()}
+            title="Sign out"
+            aria-label="Sign out"
+            className="flex size-8 items-center justify-center border border-border text-muted-foreground hover:bg-accent hover:text-foreground"
+          >
+            <LogOut className="size-4" />
+          </button>
+        ) : null}
       </div>
     </header>
   );
@@ -188,10 +255,20 @@ function GlobalSearch() {
     return [
       ...vessels
         .filter((v) => (v.name + v.imo).toLowerCase().includes(t))
-        .map((v) => ({ id: v.id, kind: "Vessel", label: `${v.name} · ${v.imo}`, to: `/vessels/${v.id}` })),
+        .map((v) => ({
+          id: v.id,
+          kind: "Vessel",
+          label: `${v.name} · ${v.imo}`,
+          to: `/vessels/${v.id}`,
+        })),
       ...incidents
         .filter((i) => (i.ref + i.title).toLowerCase().includes(t))
-        .map((i) => ({ id: i.id, kind: "Incident", label: `${i.ref} · ${i.title}`, to: `/incidents` })),
+        .map((i) => ({
+          id: i.id,
+          kind: "Incident",
+          label: `${i.ref} · ${i.title}`,
+          to: `/incidents`,
+        })),
     ].slice(0, 8);
   }, [q, vessels, incidents]);
 

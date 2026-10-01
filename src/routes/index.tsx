@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMemo } from "react";
-import { AlertTriangle, ShieldCheck } from "lucide-react";
+import { AlertTriangle, ClipboardCheck, ShieldCheck } from "lucide-react";
 import { securityService } from "@/lib/seashield/services";
 import { useSeaShield } from "@/lib/seashield/useSeaShield";
 import { elapsed, severityText, stateColor, utcTime } from "@/lib/seashield/format";
@@ -41,6 +41,8 @@ function Dashboard() {
   const scope = useSeaShield((s) => s.selectedVesselId);
   const vessels = useSeaShield((s) => s.vessels);
   const incidents = useSeaShield((s) => s.incidents);
+  const safetyRounds = useSeaShield((s) => s.safetyRounds);
+  const safetyFindings = useSeaShield((s) => s.safetyFindings);
   const cyber = useSeaShield((s) => s.cyber);
   const s = useMemo(() => securityService.fleetSummary(scope), [scope, vessels, incidents, cyber]);
   const activeIncidents = incidents.filter((i) => i.status !== "closed").slice(0, 6);
@@ -50,7 +52,9 @@ function Dashboard() {
     <div className="flex min-h-0 flex-1 flex-col">
       <PageHeader
         title="Security Operations Dashboard"
-        subtitle={scope === "all" ? "Fleet-wide monitoring" : vessels.find((v) => v.id === scope)?.name}
+        subtitle={
+          scope === "all" ? "Fleet-wide monitoring" : vessels.find((v) => v.id === scope)?.name
+        }
         actions={<SimBanner />}
       />
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-2 overflow-auto p-2 xl:grid-cols-[1fr_25rem]">
@@ -97,6 +101,54 @@ function Dashboard() {
           </div>
 
           <div className="grid min-h-0 gap-2 lg:grid-cols-2">
+            <Panel
+              title="Safety rounds"
+              meta={`${safetyRounds.filter((round) => round.status === "IN_PROGRESS").length} active`}
+              actions={
+                <Link
+                  to="/safety-rounds"
+                  className="label-mono border border-border px-2 py-1 hover:bg-accent"
+                >
+                  Open rounds
+                </Link>
+              }
+            >
+              <div className="grid grid-cols-3 divide-x divide-border p-3">
+                <div className="px-2">
+                  <div className="label-mono">Active</div>
+                  <div className="mt-1 tabular text-lg font-semibold text-signal">
+                    {safetyRounds.filter((round) => round.status === "IN_PROGRESS").length}
+                  </div>
+                </div>
+                <div className="px-2">
+                  <div className="label-mono">Open findings</div>
+                  <div className="mt-1 tabular text-lg font-semibold text-warning">
+                    {
+                      safetyFindings.filter(
+                        (finding) => !["RESOLVED", "DISMISSED"].includes(finding.status),
+                      ).length
+                    }
+                  </div>
+                </div>
+                <div className="px-2">
+                  <div className="label-mono">Critical</div>
+                  <div className="mt-1 tabular text-lg font-semibold text-critical">
+                    {
+                      safetyFindings.filter(
+                        (finding) =>
+                          finding.severity === "CRITICAL" &&
+                          !["RESOLVED", "DISMISSED"].includes(finding.status),
+                      ).length
+                    }
+                  </div>
+                </div>
+              </div>
+              {safetyRounds.length === 0 ? (
+                <div className="flex items-center gap-2 border-t border-border px-3 py-2 text-xs text-muted-foreground">
+                  <ClipboardCheck className="size-3.5" /> No rounds recorded.
+                </div>
+              ) : null}
+            </Panel>
             <Panel title="Fleet security posture" meta={`${vessels.length} vessels`} scroll>
               <ul>
                 {vessels.map((v) => (
@@ -114,7 +166,12 @@ function Dashboard() {
                       <span className="w-28">
                         <ScoreBar score={v.securityScore} />
                       </span>
-                      <span className={cn("tabular w-8 text-right text-xs", stateColor[v.securityState])}>
+                      <span
+                        className={cn(
+                          "tabular w-8 text-right text-xs",
+                          stateColor[v.securityState],
+                        )}
+                      >
                         {v.securityScore}
                       </span>
                       <span className="tabular w-14 text-right text-[10px] text-muted-foreground">
@@ -130,7 +187,10 @@ function Dashboard() {
               title="Active incidents"
               meta={`${activeIncidents.length} open`}
               actions={
-                <Link to="/incidents" className="label-mono border border-border px-2 py-1 hover:bg-accent">
+                <Link
+                  to="/incidents"
+                  className="label-mono border border-border px-2 py-1 hover:bg-accent"
+                >
                   Open queue
                 </Link>
               }
@@ -165,7 +225,11 @@ function Dashboard() {
 
           <Panel
             title="Recent security events"
-            meta={<span className="flex items-center gap-1"><AlertTriangle className="size-3" /> live stream</span>}
+            meta={
+              <span className="flex items-center gap-1">
+                <AlertTriangle className="size-3" /> live stream
+              </span>
+            }
             className="min-h-72"
             scroll
           >

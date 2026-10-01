@@ -16,7 +16,8 @@ class IncidentManager:
         if existing:
             existing.related_event_ids = list(dict.fromkeys([*existing.related_event_ids, *result.related_event_ids]))
             return existing
-        incident = Incident(incident_id=f"INC-{241 + len(self._incidents):04d}", vessel_id=result.vessel_id, type=result.title, title=result.title, severity=result.severity, description=result.description, related_event_ids=list(result.related_event_ids), affected_systems=list(result.affected_systems))
+        numbers = [int(item.incident_id.rsplit("-", 1)[-1]) for item in self._incidents if item.incident_id.rsplit("-", 1)[-1].isdigit()]
+        incident = Incident(incident_id=f"INC-{max([240, *numbers]) + 1:04d}", vessel_id=result.vessel_id, type=result.title, title=result.title, severity=result.severity, description=result.description, related_event_ids=list(result.related_event_ids), affected_systems=list(result.affected_systems))
         self._incidents.insert(0, incident)
         return incident
 

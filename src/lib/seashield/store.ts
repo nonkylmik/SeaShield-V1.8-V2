@@ -4,6 +4,8 @@ import type {
   IncidentStatus,
   SeaShieldState,
   SecurityEvent,
+  SafetyFinding,
+  SafetyRound,
   Severity,
   Vessel,
 } from "./types";
@@ -47,38 +49,100 @@ export function getState() {
 
 type BackendPayload = {
   health: string;
-  vessels?: Array<Pick<Vessel, "id" | "name" | "imo" | "lastComms"> & { score: number; state: Vessel["securityState"] }>;
-  cameras?: Array<{ id: string; vesselId: string; location: string; online: boolean; recording: boolean; lastFrame: number }>;
+  vessels?: Array<
+    Pick<Vessel, "id" | "name" | "imo" | "lastComms"> & {
+      score: number;
+      state: Vessel["securityState"];
+    }
+  >;
+  cameras?: Array<{
+    id: string;
+    vesselId: string;
+    location: string;
+    online: boolean;
+    recording: boolean;
+    lastFrame: number;
+  }>;
   events?: SecurityEvent[];
   incidents?: Incident[];
+  safetyRounds?: SafetyRound[];
+  safetyFindings?: SafetyFinding[];
 };
 
 /** Applies V1.8 FastAPI data while retaining V2-only visual telemetry fixtures. */
 export function hydrateFromBackend(payload: BackendPayload) {
   const seeded = buildSeedState();
   if (payload.vessels?.length) {
-    const oldIds = seeded.vessels.map((v) => v.id);
-    const mapped = payload.vessels.map((v, index) => {
-      const visual = seeded.vessels[index % seeded.vessels.length]!;
-      const score = v.score;
-      const securityState = v.state;
-      return { ...visual, ...v, securityScore: score, securityState, lastComms: v.lastComms };
+    const fixtureOwner = new Map<string, string>();
+    const slotByVessel = new Map(
+      [...payload.vessels]
+        .sort((a, b) => a.id.localeCompare(b.id))
+        .map((vessel, index) => [vessel.id, index]),
+    );
+    state.vessels = payload.vessels.map((vessel) => {
+      const slot = slotByVessel.get(vessel.id)!;
+      const visual = seeded.vessels[slot % seeded.vessels.length]!;
+      if (slot < seeded.vessels.length) fixtureOwner.set(visual.id, vessel.id);
+      return {
+        ...visual,
+        id: vessel.id,
+        name: vessel.name,
+        imo: vessel.imo,
+        securityScore: vessel.score,
+        securityState: vessel.state,
+        lastComms: vessel.lastComms,
+      };
     });
-    const remap = new Map(oldIds.map((id, index) => [id, mapped[index % mapped.length]?.id ?? id]));
-    state.vessels = mapped;
-    state.sensors = seeded.sensors.map((item) => ({ ...item, vesselId: remap.get(item.vesselId) ?? item.vesselId }));
-    state.access = seeded.access.map((item) => ({ ...item, vesselId: remap.get(item.vesselId) ?? item.vesselId }));
-    state.cyber = seeded.cyber.map((item) => ({ ...item, vesselId: remap.get(item.vesselId) ?? item.vesselId }));
+    const attachFixtures = <T extends { vesselId: string }>(fixtures: T[]) =>
+      fixtures.flatMap((fixture) => {
+        const vesselId = fixtureOwner.get(fixture.vesselId);
+        return vesselId ? [{ ...fixture, vesselId }] : [];
+      });
+    state.sensors = attachFixtures(seeded.sensors);
+    state.access = attachFixtures(seeded.access);
+    state.cyber = attachFixtures(seeded.cyber);
   }
-  if (payload.cameras) state.cameras = payload.cameras.map((camera) => ({ id: camera.id, vesselId: camera.vesselId, zone: camera.location, label: `CAM ${camera.location}`, state: camera.online ? "online" : "offline", recording: camera.recording, uptime: camera.online ? 99.9 : 0, fps: camera.online ? 25 : 0, lastFrame: camera.lastFrame }));
+  if (payload.cameras)
+    state.cameras = payload.cameras.map((camera) => ({
+      id: camera.id,
+      vesselId: camera.vesselId,
+      zone: camera.location,
+      label: `CAM ${camera.location}`,
+      state: camera.online ? "online" : "offline",
+      recording: camera.recording,
+      uptime: camera.online ? 99.9 : 0,
+      fps: camera.online ? 25 : 0,
+      lastFrame: camera.lastFrame,
+    }));
   if (payload.events) state.events = payload.events.sort((a, b) => b.ts - a.ts);
-  if (payload.incidents) state.incidents = payload.incidents.sort((a, b) => b.updatedAt - a.updatedAt);
-  state.connection = { ...state.connection, backend: payload.health === "ok" ? "online" : "degraded", mode: payload.health === "ok" ? "V1.8 ENGINE CONNECTED" : "V1.8 ENGINE UNAVAILABLE" };
+  if (payload.incidents)
+    state.incidents = payload.incidents.sort((a, b) => b.updatedAt - a.updatedAt);
+  if (payload.safetyRounds) state.safetyRounds = payload.safetyRounds;
+  if (payload.safetyFindings) state.safetyFindings = payload.safetyFindings;
+  state.connection = {
+    ...state.connection,
+    backend: payload.health === "ok" ? "online" : "degraded",
+    mode: payload.health === "ok" ? "V1.8 ENGINE CONNECTED" : "V1.8 ENGINE UNAVAILABLE",
+  };
   emit();
 }
 
 export function selectVessel(id: string | "all") {
   state.selectedVesselId = id;
+  emit();
+}
+
+export function setOperator(name: string, role: string) {
+  state.operator = { ...state.operator, name, role };
+  emit();
+}
+
+export function appendSafetyRounds(rounds: SafetyRound[]) {
+  const known = new Set(state.safetyRounds.map((round) => round.round_id));
+  state.safetyRounds = [
+    ...state.safetyRounds,
+    ...rounds.filter((round) => !known.has(round.round_id)),
+  ];
   emit();
 }
 
@@ -196,7 +260,10 @@ export function addIncidentNote(id: string, body: string, author: string) {
           ...i,
           updatedAt: now(),
           notes: [...i.notes, { id: uid("note"), ts: now(), author, body }],
-          timeline: [...i.timeline, { id: uid("tl"), ts: now(), text: "Investigation note added." }],
+          timeline: [
+            ...i.timeline,
+            { id: uid("tl"), ts: now(), text: "Investigation note added." },
+          ],
         }
       : i,
   );
@@ -231,7 +298,12 @@ export const SCENARIOS: { id: ScenarioId; label: string; group: string; severity
   { id: "unauthorized-access", label: "Unauthorized access", group: "Access", severity: "high" },
   { id: "unknown-device", label: "Unknown network device", group: "Cyber", severity: "medium" },
   { id: "brute-force", label: "Brute-force login attempt", group: "Cyber", severity: "high" },
-  { id: "suspicious-traffic", label: "Suspicious network traffic", group: "Cyber", severity: "high" },
+  {
+    id: "suspicious-traffic",
+    label: "Suspicious network traffic",
+    group: "Cyber",
+    severity: "high",
+  },
   { id: "gps-anomaly", label: "GPS / AIS anomaly", group: "Navigation", severity: "medium" },
   { id: "sensor-failure", label: "Sensor failure", group: "Sensors", severity: "medium" },
   { id: "firewall-block", label: "Firewall block", group: "Cyber", severity: "low" },
@@ -456,9 +528,7 @@ export function triggerScenario(scenario: ScenarioId, vesselId: string) {
       break;
     }
     case "gps-anomaly": {
-      state.vessels = state.vessels.map((v) =>
-        v.id === vid ? { ...v, gpsAis: "degraded" } : v,
-      );
+      state.vessels = state.vessels.map((v) => (v.id === vid ? { ...v, gpsAis: "degraded" } : v));
       pushEvent({
         vesselId: vid,
         category: "navigation",

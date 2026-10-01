@@ -140,13 +140,7 @@ const VESSEL_SEED: Array<
   },
 ];
 
-const OPERATORS = [
-  "K. Halvorsen",
-  "M. Okonjo",
-  "D. Reyes",
-  "S. Lindqvist",
-  "A. Nasser",
-];
+const OPERATORS = ["K. Halvorsen", "M. Okonjo", "D. Reyes", "S. Lindqvist", "A. Nasser"];
 
 function stateScore(state: Vessel["securityState"]) {
   return state === "secure"
@@ -356,6 +350,8 @@ export function buildSeedState(): SeaShieldState {
     access,
     cyber,
     incidents,
+    safetyRounds: [],
+    safetyFindings: [],
     notifications: [
       {
         id: "ntf-1",
@@ -421,7 +417,11 @@ function makeIncident(
       },
     ],
     timeline: [
-      { id: `${ref}-t1`, ts: openedAt, text: `Incident opened from correlated events (${system}).` },
+      {
+        id: `${ref}-t1`,
+        ts: openedAt,
+        text: `Incident opened from correlated events (${system}).`,
+      },
       { id: `${ref}-t2`, ts: openedAt + 300_000, text: `Assigned to ${assignee}.` },
       { id: `${ref}-t3`, ts: openedAt + 600_000, text: `Status set to ${status}.` },
     ],

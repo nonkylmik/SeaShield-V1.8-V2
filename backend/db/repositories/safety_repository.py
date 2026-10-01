@@ -63,6 +63,16 @@ ROUND_TEMPLATE_MAP: dict[str, list[str]] = {
         "Access control verification",
         "Communications readiness",
     ],
+    "Evening Safety & Security Round": [
+        "Emergency Exit",
+        "Fire Extinguisher",
+        "CCTV",
+        "Restricted Access",
+        "Deck Condition",
+        "Emergency Lighting",
+        "Access Control",
+        "Communications",
+    ],
 }
 
 VALID_STATUSES = {"PASS", "WARNING", "FAIL", "NOT_APPLICABLE", "NOT_CHECKED"}
@@ -83,8 +93,11 @@ def _require_status(record: SafetyRoundRecord, allowed: set[str], action: str) -
         )
 
 
-def generate_round_id(db: Session) -> str:
-    return f"SR-{datetime.now(timezone.utc):%Y%m%d%H%M%S}-{uuid4().hex[:8]}"
+def generate_round_id(db: Session, internal_id: int | None = None) -> str:
+    stable_id = internal_id
+    if stable_id is None:
+        stable_id = (db.scalar(select(SafetyRoundRecord.id).order_by(SafetyRoundRecord.id.desc()).limit(1)) or 0) + 1
+    return f"SR-{datetime.now(timezone.utc).year}-{stable_id:04d}"
 
 
 def default_round_template(round_type: str) -> list[dict[str, Any]]:
@@ -109,6 +122,26 @@ def default_round_template(round_type: str) -> list[dict[str, Any]]:
     ]
 
 
+def list_safety_round_templates() -> list[dict[str, Any]]:
+    return [
+        {
+            "name": name,
+            "checkpoints": [
+                {
+                    "name": checkpoint["name"],
+                    "category": checkpoint["category"],
+                    "location": checkpoint["location"],
+                    "description": checkpoint["description"],
+                    "required": checkpoint["required"],
+                    "sequence": sequence,
+                }
+                for sequence, checkpoint in enumerate(default_round_template(name), start=1)
+            ],
+        }
+        for name in ROUND_TEMPLATE_MAP
+    ]
+
+
 def create_safety_round(
     db: Session,
     *,
@@ -120,10 +153,11 @@ def create_safety_round(
     template_name: str | None = None,
     title: str | None = None,
     description: str = "",
+    commit: bool = True,
 ) -> dict[str, Any]:
     now = datetime.now(timezone.utc)
     record = SafetyRoundRecord(
-        round_id=generate_round_id(db),
+        round_id=f"pending-{uuid4().hex}",
         vessel_id=vessel_id,
         title=title or round_type or "General Safety Round",
         description=description or notes,
@@ -134,6 +168,8 @@ def create_safety_round(
         status="PLANNED",
     )
     db.add(record)
+    db.flush()
+    record.round_id = generate_round_id(db, record.id)
     db.flush()
 
     for sequence, checkpoint in enumerate(default_round_template(template_name or record.round_type), start=1):
@@ -151,8 +187,11 @@ def create_safety_round(
                 severity=checkpoint["severity"],
             )
         )
-    db.commit()
-    db.refresh(record)
+    if commit:
+        db.commit()
+        db.refresh(record)
+    else:
+        db.flush()
     return round_response(record, list_safety_checkpoints(db, record.round_id))
 
 
@@ -165,6 +204,11 @@ def list_safety_rounds(
     vessel_id: str | None = None,
     status: str | None = None,
     round_type: str | None = None,
+    assigned_to: str | None = None,
+    start: datetime | None = None,
+    end: datetime | None = None,
+    limit: int = 100,
+    offset: int = 0,
 ) -> list[SafetyRoundRecord]:
     query = select(SafetyRoundRecord)
     if vessel_id:
@@ -173,11 +217,17 @@ def list_safety_rounds(
         query = query.where(SafetyRoundRecord.status == status)
     if round_type:
         query = query.where(SafetyRoundRecord.round_type == round_type)
-    query = query.order_by(SafetyRoundRecord.created_at.desc())
+    if assigned_to:
+        query = query.where(SafetyRoundRecord.assigned_to == assigned_to)
+    if start:
+        query = query.where(SafetyRoundRecord.planned_start >= start)
+    if end:
+        query = query.where(SafetyRoundRecord.planned_start <= end)
+    query = query.order_by(SafetyRoundRecord.planned_start.desc(), SafetyRoundRecord.id.desc()).limit(limit).offset(offset)
     return list(db.scalars(query).all())
 
 
-def start_safety_round(db: Session, round_id: str) -> SafetyRoundRecord | None:
+def start_safety_round(db: Session, round_id: str, *, commit: bool = True) -> SafetyRoundRecord | None:
     record = get_safety_round(db, round_id)
     if record is None:
         return None
@@ -185,12 +235,15 @@ def start_safety_round(db: Session, round_id: str) -> SafetyRoundRecord | None:
     record.status = "IN_PROGRESS"
     record.started_at = record.started_at or datetime.now(timezone.utc)
     record.updated_at = datetime.now(timezone.utc)
-    db.commit()
-    db.refresh(record)
+    if commit:
+        db.commit()
+        db.refresh(record)
+    else:
+        db.flush()
     return record
 
 
-def complete_safety_round(db: Session, round_id: str) -> SafetyRoundRecord | None:
+def complete_safety_round(db: Session, round_id: str, *, commit: bool = True) -> SafetyRoundRecord | None:
     record = get_safety_round(db, round_id)
     if record is None:
         return None
@@ -205,20 +258,26 @@ def complete_safety_round(db: Session, round_id: str) -> SafetyRoundRecord | Non
     record.status = "COMPLETED"
     record.completed_at = datetime.now(timezone.utc)
     record.updated_at = datetime.now(timezone.utc)
-    db.commit()
-    db.refresh(record)
+    if commit:
+        db.commit()
+        db.refresh(record)
+    else:
+        db.flush()
     return record
 
 
-def cancel_safety_round(db: Session, round_id: str) -> SafetyRoundRecord | None:
+def cancel_safety_round(db: Session, round_id: str, *, commit: bool = True) -> SafetyRoundRecord | None:
     record = get_safety_round(db, round_id)
     if record is None:
         return None
     _require_status(record, OPEN_ROUND_STATUSES, "cancel")
     record.status = "CANCELLED"
     record.updated_at = datetime.now(timezone.utc)
-    db.commit()
-    db.refresh(record)
+    if commit:
+        db.commit()
+        db.refresh(record)
+    else:
+        db.flush()
     return record
 
 
@@ -253,6 +312,7 @@ def update_safety_checkpoint(
     severity: str = "INFO",
     notes: str | None = None,
     completed_by: str | None = None,
+    commit: bool = True,
 ) -> SafetyCheckpointRecord | None:
     checkpoint = get_safety_checkpoint(db, round_id, checkpoint_id)
     if checkpoint is None:
@@ -280,8 +340,11 @@ def update_safety_checkpoint(
         else None
     )
     checkpoint.updated_at = datetime.now(timezone.utc)
-    db.commit()
-    db.refresh(checkpoint)
+    if commit:
+        db.commit()
+        db.refresh(checkpoint)
+    else:
+        db.flush()
     return checkpoint
 
 
@@ -290,6 +353,10 @@ def list_safety_findings(
     round_id: str | None = None,
     vessel_id: str | None = None,
     status: str | None = None,
+    severity: str | None = None,
+    assigned_to: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
 ) -> list[SafetyFindingRecord]:
     query = select(SafetyFindingRecord)
     if round_id:
@@ -298,7 +365,11 @@ def list_safety_findings(
         query = query.where(SafetyFindingRecord.vessel_id == vessel_id)
     if status:
         query = query.where(SafetyFindingRecord.status == status)
-    query = query.order_by(SafetyFindingRecord.created_at.desc())
+    if severity:
+        query = query.where(SafetyFindingRecord.severity == severity)
+    if assigned_to:
+        query = query.where(SafetyFindingRecord.assigned_to == assigned_to)
+    query = query.order_by(SafetyFindingRecord.created_at.desc(), SafetyFindingRecord.id.desc()).limit(limit).offset(offset)
     return list(db.scalars(query).all())
 
 
@@ -320,6 +391,7 @@ def create_safety_finding(
     location: str = "",
     due_date: datetime | None = None,
     resolution_notes: str = "",
+    commit: bool = True,
 ) -> SafetyFindingRecord:
     if checkpoint_id:
         existing = db.scalar(
@@ -348,8 +420,11 @@ def create_safety_finding(
         resolution_notes=resolution_notes,
     )
     db.add(record)
-    db.commit()
-    db.refresh(record)
+    if commit:
+        db.commit()
+        db.refresh(record)
+    else:
+        db.flush()
     return record
 
 
@@ -360,8 +435,11 @@ def update_safety_finding(
     status: str | None = None,
     severity: str | None = None,
     assigned_to: str | None = None,
+    due_date: datetime | None = None,
+    clear_due_date: bool = False,
     resolution_notes: str | None = None,
     notes: str | None = None,
+    commit: bool = True,
 ) -> SafetyFindingRecord | None:
     record = get_safety_finding(db, finding_id)
     if record is None:
@@ -379,13 +457,20 @@ def update_safety_finding(
         record.severity = normalized_severity
     if assigned_to is not None:
         record.assigned_to = assigned_to
+    if due_date is not None:
+        record.due_date = due_date
+    elif clear_due_date:
+        record.due_date = None
     if resolution_notes is not None:
         record.resolution_notes = resolution_notes
     if notes is not None:
         record.resolution_notes = notes
     record.updated_at = datetime.now(timezone.utc)
-    db.commit()
-    db.refresh(record)
+    if commit:
+        db.commit()
+        db.refresh(record)
+    else:
+        db.flush()
     return record
 
 

@@ -42,6 +42,12 @@ function VesselDetail() {
   const access = useSeaShield((s) => s.access.filter((a) => a.vesselId === vesselId).slice(0, 8));
   const cyber = useSeaShield((s) => s.cyber.filter((c) => c.vesselId === vesselId).slice(0, 8));
   const incidents = useSeaShield((s) => s.incidents.filter((i) => i.vesselId === vesselId));
+  const safetyRounds = useSeaShield((s) =>
+    s.safetyRounds.filter((round) => round.vessel_id === vesselId),
+  );
+  const safetyFindings = useSeaShield((s) =>
+    s.safetyFindings.filter((finding) => finding.vessel_id === vesselId),
+  );
   const events = useSeaShield((s) => s.events.filter((e) => e.vesselId === vesselId).slice(0, 20));
 
   if (!vessel) throw notFound();
@@ -57,7 +63,10 @@ function VesselDetail() {
         actions={
           <div className="flex items-center gap-2">
             <SimBanner />
-            <Link to="/vessels" className="label-mono flex items-center gap-1 border border-border px-2 py-1 hover:bg-accent">
+            <Link
+              to="/vessels"
+              className="label-mono flex items-center gap-1 border border-border px-2 py-1 hover:bg-accent"
+            >
               <ArrowLeft className="size-3" /> Vessels
             </Link>
           </div>
@@ -68,19 +77,82 @@ function VesselDetail() {
           <Metric
             label="Security score"
             value={vessel.securityScore}
-            tone={vessel.securityState === "secure" ? "secure" : vessel.securityState === "critical" ? "critical" : "caution"}
+            tone={
+              vessel.securityState === "secure"
+                ? "secure"
+                : vessel.securityState === "critical"
+                  ? "critical"
+                  : "caution"
+            }
             sub={vessel.securityState.toUpperCase()}
           >
             <ScoreBar score={vessel.securityScore} />
           </Metric>
           <SystemMetric label="Physical security" state={vessel.physical} />
-          <Metric label="CCTV" value={`${camsOnline}/${cameras.length}`} tone={camsOnline === cameras.length ? "secure" : "caution"} sub="feeds online" />
+          <Metric
+            label="CCTV"
+            value={`${camsOnline}/${cameras.length}`}
+            tone={camsOnline === cameras.length ? "secure" : "caution"}
+            sub="feeds online"
+          />
           <SystemMetric label="Access control" online={vessel.accessControl} />
-          <Metric label="Sensors" value={`${sensorsOnline}/${sensors.length}`} tone={sensorsOnline === sensors.length ? "secure" : "caution"} sub="reporting" />
+          <Metric
+            label="Sensors"
+            value={`${sensorsOnline}/${sensors.length}`}
+            tone={sensorsOnline === sensors.length ? "secure" : "caution"}
+            sub="reporting"
+          />
           <SystemMetric label="Cybersecurity" state={vessel.cyber} />
           <SystemMetric label="Network" online={vessel.network} />
           <SystemMetric label="GPS / AIS" online={vessel.gpsAis} sub={vessel.position} />
         </div>
+
+        <Panel
+          title="Safety status"
+          meta={`${safetyRounds.filter((round) => round.status === "IN_PROGRESS").length} active rounds`}
+          actions={
+            <Link
+              to="/safety-rounds"
+              className="label-mono border border-border px-2 py-1 hover:bg-accent"
+            >
+              View rounds
+            </Link>
+          }
+        >
+          <div className="grid grid-cols-2 divide-x divide-border md:grid-cols-4">
+            <SafetyVesselMetric
+              label="Active round"
+              value={
+                safetyRounds.find((round) => round.status === "IN_PROGRESS")?.round_type ?? "None"
+              }
+            />
+            <SafetyVesselMetric
+              label="Last completed"
+              value={
+                safetyRounds.find((round) => round.status === "COMPLETED")?.round_type ??
+                "None recorded"
+              }
+            />
+            <SafetyVesselMetric
+              label="Open findings"
+              value={
+                safetyFindings.filter(
+                  (finding) => !["RESOLVED", "DISMISSED"].includes(finding.status),
+                ).length
+              }
+            />
+            <SafetyVesselMetric
+              label="Critical findings"
+              value={
+                safetyFindings.filter(
+                  (finding) =>
+                    finding.severity === "CRITICAL" &&
+                    !["RESOLVED", "DISMISSED"].includes(finding.status),
+                ).length
+              }
+            />
+          </div>
+        </Panel>
 
         <Panel title="CCTV — simulated feeds" meta={`${cameras.length} cameras`}>
           <div className="grid grid-cols-2 gap-2 p-2 md:grid-cols-4 2xl:grid-cols-8">
@@ -95,13 +167,21 @@ function VesselDetail() {
             <table className="w-full text-xs">
               <tbody>
                 {sensors.map((s) => (
-                  <tr key={s.id} className={cn("border-b border-border/50", s.alarm && "bg-critical/10")}>
+                  <tr
+                    key={s.id}
+                    className={cn("border-b border-border/50", s.alarm && "bg-critical/10")}
+                  >
                     <td className="px-3 py-1.5">
                       <StatusDot state={s.state} pulse={s.alarm} />
                     </td>
                     <td className="label-mono px-2 py-1.5">{s.kind}</td>
                     <td className="px-2 py-1.5 text-muted-foreground">{s.location}</td>
-                    <td className={cn("tabular px-3 py-1.5 text-right", s.alarm ? "text-critical" : "")}>
+                    <td
+                      className={cn(
+                        "tabular px-3 py-1.5 text-right",
+                        s.alarm ? "text-critical" : "",
+                      )}
+                    >
                       {s.reading}
                     </td>
                   </tr>
@@ -145,7 +225,9 @@ function VesselDetail() {
                       <SeverityTag severity={c.severity} />
                     </td>
                     <td className="px-2 py-1.5">{c.summary}</td>
-                    <td className="tabular px-3 py-1.5 text-right text-muted-foreground">{c.host}</td>
+                    <td className="tabular px-3 py-1.5 text-right text-muted-foreground">
+                      {c.host}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -157,13 +239,22 @@ function VesselDetail() {
           <Panel title="Incidents" meta={`${incidents.length} total`} className="max-h-72" scroll>
             <ul>
               {incidents.length === 0 ? (
-                <li className="p-3 text-xs text-muted-foreground">No incidents recorded for this vessel.</li>
+                <li className="p-3 text-xs text-muted-foreground">
+                  No incidents recorded for this vessel.
+                </li>
               ) : (
                 incidents.map((i) => (
-                  <li key={i.id} className="flex items-center gap-2 border-b border-border/50 px-3 py-2">
+                  <li
+                    key={i.id}
+                    className="flex items-center gap-2 border-b border-border/50 px-3 py-2"
+                  >
                     <SeverityTag severity={i.severity} />
                     <span className="tabular text-[10px] text-muted-foreground">{i.ref}</span>
-                    <span className={cn("min-w-0 flex-1 truncate text-xs", severityText[i.severity])}>{i.title}</span>
+                    <span
+                      className={cn("min-w-0 flex-1 truncate text-xs", severityText[i.severity])}
+                    >
+                      {i.title}
+                    </span>
                     <span className="label-mono">{i.status}</span>
                   </li>
                 ))
@@ -171,10 +262,18 @@ function VesselDetail() {
             </ul>
           </Panel>
 
-          <Panel title="Vessel event log" meta={`comms ${elapsed(vessel.lastComms, t)} ago`} className="max-h-72" scroll>
+          <Panel
+            title="Vessel event log"
+            meta={`comms ${elapsed(vessel.lastComms, t)} ago`}
+            className="max-h-72"
+            scroll
+          >
             <ul>
               {events.map((e) => (
-                <li key={e.id} className="flex items-start gap-2 border-b border-border/50 px-3 py-1.5 text-xs">
+                <li
+                  key={e.id}
+                  className="flex items-start gap-2 border-b border-border/50 px-3 py-1.5 text-xs"
+                >
                   <span className="tabular text-muted-foreground">{utcTime(e.ts)}</span>
                   <SeverityTag severity={e.severity} />
                   <span className="min-w-0 flex-1">
@@ -187,6 +286,15 @@ function VesselDetail() {
           </Panel>
         </div>
       </div>
+    </div>
+  );
+}
+
+function SafetyVesselMetric({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="min-w-0 px-3 py-2">
+      <div className="label-mono">{label}</div>
+      <div className="mt-1 truncate text-xs font-medium">{value}</div>
     </div>
   );
 }
@@ -207,7 +315,9 @@ function SystemMetric({
   return (
     <div className="flex min-w-0 flex-col justify-between gap-2 border border-border bg-panel px-3 py-2.5">
       <div className="label-mono truncate">{label}</div>
-      <div className={cn("tabular flex items-center gap-2 text-lg leading-none font-semibold", cls)}>
+      <div
+        className={cn("tabular flex items-center gap-2 text-lg leading-none font-semibold", cls)}
+      >
         <StatusDot state={(state ?? online)!} />
         {text}
       </div>

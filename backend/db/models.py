@@ -4,7 +4,7 @@ from typing import Any
 import sqlalchemy as sa
 from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import JSON
 
 from db.database import Base
@@ -143,6 +143,8 @@ class SafetyRoundRecord(Base):
     notes: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    checkpoints: Mapped[list["SafetyCheckpointRecord"]] = relationship(back_populates="round", order_by="SafetyCheckpointRecord.sequence")
+    findings: Mapped[list["SafetyFindingRecord"]] = relationship(back_populates="round")
 
 
 class SafetyCheckpointRecord(Base):
@@ -164,6 +166,8 @@ class SafetyCheckpointRecord(Base):
     completed_by: Mapped[str | None] = mapped_column(String(160), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    round: Mapped[SafetyRoundRecord] = relationship(back_populates="checkpoints")
+    findings: Mapped[list["SafetyFindingRecord"]] = relationship(back_populates="checkpoint")
 
 
 class SafetyFindingRecord(Base):
@@ -172,7 +176,7 @@ class SafetyFindingRecord(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     finding_id: Mapped[str] = mapped_column(String(120), unique=True, index=True)
     round_id: Mapped[str] = mapped_column(String(100), ForeignKey("safety_rounds.round_id"), index=True)
-    checkpoint_id: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    checkpoint_id: Mapped[str | None] = mapped_column(String(120), ForeignKey("safety_checkpoints.checkpoint_id"), nullable=True, index=True)
     vessel_id: Mapped[str] = mapped_column(String(100), index=True)
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     description: Mapped[str] = mapped_column(Text, default="")
@@ -186,3 +190,5 @@ class SafetyFindingRecord(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    round: Mapped[SafetyRoundRecord] = relationship(back_populates="findings")
+    checkpoint: Mapped[SafetyCheckpointRecord | None] = relationship(back_populates="findings")

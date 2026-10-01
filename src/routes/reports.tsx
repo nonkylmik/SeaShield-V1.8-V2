@@ -18,7 +18,8 @@ export const Route = createFileRoute("/reports")({
       { property: "og:title", content: "Security Reporting — SeaShield" },
       {
         property: "og:description",
-        content: "Compliance-oriented reporting across events, uptime, violations and security scores.",
+        content:
+          "Compliance-oriented reporting across events, uptime, violations and security scores.",
       },
     ],
   }),
@@ -38,6 +39,43 @@ function ReportsView() {
   const sensors = inScope(state.sensors);
   const access = inScope(state.access);
   const incidents = inScope(state.incidents);
+  const safetyRounds = state.safetyRounds.filter(
+    (round) => scope === "all" || round.vessel_id === scope,
+  );
+  const safetyFindings = state.safetyFindings.filter(
+    (finding) => scope === "all" || finding.vessel_id === scope,
+  );
+  const checkpoints = safetyRounds.flatMap((round) => round.checkpoints);
+  const checkedCheckpoints = checkpoints.filter(
+    (checkpoint) => checkpoint.status !== "NOT_CHECKED",
+  );
+  const failedCheckpoints = checkedCheckpoints.filter(
+    (checkpoint) => checkpoint.status === "FAIL",
+  ).length;
+  const resolvedFindings = safetyFindings.filter((finding) => finding.status === "RESOLVED");
+  const averageResolutionHours = resolvedFindings.length
+    ? Math.round(
+        resolvedFindings.reduce(
+          (total, finding) =>
+            total +
+            (Date.parse(finding.resolved_at ?? finding.updated_at) -
+              Date.parse(finding.created_at)) /
+              3_600_000,
+          0,
+        ) / resolvedFindings.length,
+      )
+    : null;
+  const categoryCounts = [...new Set(checkpoints.map((checkpoint) => checkpoint.category))].map(
+    (category) => ({
+      category,
+      failures: checkpoints.filter(
+        (checkpoint) => checkpoint.category === category && checkpoint.status === "FAIL",
+      ).length,
+    }),
+  );
+  const repeatFindings = new Map<string, number>();
+  for (const finding of safetyFindings)
+    repeatFindings.set(finding.title, (repeatFindings.get(finding.title) ?? 0) + 1);
   const vessels = scope === "all" ? state.vessels : state.vessels.filter((v) => v.id === scope);
 
   const byCategory = ["cyber", "access", "sensor", "camera", "navigation", "system"].map((c) => ({
@@ -46,9 +84,7 @@ function ReportsView() {
   }));
   const max = Math.max(1, ...byCategory.map((b) => b.n));
 
-  const camUptime = cameras.length
-    ? cameras.reduce((a, c) => a + c.uptime, 0) / cameras.length
-    : 0;
+  const camUptime = cameras.length ? cameras.reduce((a, c) => a + c.uptime, 0) / cameras.length : 0;
   const senUptime = sensors.length ? sensors.reduce((a, c) => a + c.uptime, 0) / sensors.length : 0;
 
   return (
@@ -61,7 +97,11 @@ function ReportsView() {
       <div className="min-h-0 flex-1 space-y-2 overflow-auto p-2">
         <div className="grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-6">
           <Metric label="Security events" value={events.length} sub="in current scope" />
-          <Metric label="Incidents" value={incidents.length} sub={`${s.activeIncidents} still active`} />
+          <Metric
+            label="Incidents"
+            value={incidents.length}
+            sub={`${s.activeIncidents} still active`}
+          />
           <Metric
             label="Camera uptime"
             value={`${camUptime.toFixed(1)}%`}
@@ -77,10 +117,101 @@ function ReportsView() {
             value={access.filter((a) => a.result !== "authorized").length}
             tone="caution"
           />
-          <Metric label="Avg security score" value={s.avgScore} tone={s.avgScore >= 86 ? "secure" : "caution"}>
+          <Metric
+            label="Avg security score"
+            value={s.avgScore}
+            tone={s.avgScore >= 86 ? "secure" : "caution"}
+          >
             <ScoreBar score={s.avgScore} />
           </Metric>
         </div>
+
+        <Panel title="Safety round summary" meta="persisted inspection records" scroll>
+          <div className="grid grid-cols-2 gap-px bg-border md:grid-cols-5">
+            {[
+              [
+                "Active rounds",
+                safetyRounds.filter((round) => round.status === "IN_PROGRESS").length,
+              ],
+              ["Completed", safetyRounds.filter((round) => round.status === "COMPLETED").length],
+              [
+                "Open findings",
+                safetyFindings.filter(
+                  (finding) => !["RESOLVED", "DISMISSED"].includes(finding.status),
+                ).length,
+              ],
+              [
+                "Critical findings",
+                safetyFindings.filter(
+                  (finding) =>
+                    finding.severity === "CRITICAL" &&
+                    !["RESOLVED", "DISMISSED"].includes(finding.status),
+                ).length,
+              ],
+              [
+                "Unresolved rounds",
+                safetyRounds.filter((round) =>
+                  ["PLANNED", "IN_PROGRESS", "OVERDUE"].includes(round.status),
+                ).length,
+              ],
+              [
+                "Checkpoint failure rate",
+                checkedCheckpoints.length
+                  ? `${Math.round((failedCheckpoints / checkedCheckpoints.length) * 100)}%`
+                  : "—",
+              ],
+              [
+                "Avg. resolution",
+                averageResolutionHours === null ? "—" : `${averageResolutionHours} h`,
+              ],
+            ].map(([label, value]) => (
+              <div key={label} className="bg-panel px-3 py-2">
+                <div className="label-mono">{label}</div>
+                <div className="mt-1 tabular text-lg font-semibold">{value}</div>
+              </div>
+            ))}
+          </div>
+          <div className="grid gap-2 p-3 md:grid-cols-2">
+            <div className="label-mono">Findings by severity</div>
+            <div className="flex flex-wrap gap-3 text-xs">
+              {["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"].map((severity) => (
+                <span key={severity}>
+                  {severity}{" "}
+                  <strong className="tabular">
+                    {safetyFindings.filter((finding) => finding.severity === severity).length}
+                  </strong>
+                </span>
+              ))}
+            </div>
+          </div>
+          <div className="grid gap-2 border-t border-border p-3 md:grid-cols-2">
+            <div>
+              <div className="label-mono mb-1">Checkpoint failures by category</div>
+              <div className="flex flex-wrap gap-3 text-xs">
+                {categoryCounts.map((item) => (
+                  <span key={item.category}>
+                    {item.category} <strong className="tabular">{item.failures}</strong>
+                  </span>
+                ))}
+              </div>
+            </div>
+            <div>
+              <div className="label-mono mb-1">Repeat findings</div>
+              <div className="flex flex-wrap gap-3 text-xs">
+                {[...repeatFindings]
+                  .filter(([, count]) => count > 1)
+                  .map(([title, count]) => (
+                    <span key={title}>
+                      {title} <strong className="tabular">×{count}</strong>
+                    </span>
+                  ))}
+                {![...repeatFindings.values()].some((count) => count > 1) ? (
+                  <span className="text-muted-foreground">None</span>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        </Panel>
 
         <div className="grid gap-2 xl:grid-cols-3">
           <Panel title="Events by category" meta="current session" scroll>
@@ -141,7 +272,12 @@ function ReportsView() {
           </Panel>
         </div>
 
-        <Panel title="Camera and sensor availability" meta="device level" className="max-h-96" scroll>
+        <Panel
+          title="Camera and sensor availability"
+          meta="device level"
+          className="max-h-96"
+          scroll
+        >
           <table className="w-full text-xs">
             <thead className="sticky top-0 bg-panel-header">
               <tr className="border-b border-border">

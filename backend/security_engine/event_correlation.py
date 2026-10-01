@@ -35,9 +35,11 @@ RULES = (
 )
 
 
-def correlate(events: Iterable[SecurityEvent], vessel_id: str) -> CorrelationResult | None:
+def correlate(events: Iterable[SecurityEvent], vessel_id: str, trigger_event_type: str | None = None) -> CorrelationResult | None:
     relevant = [event for event in events if event.vessel_id == vessel_id and event.status != "RESOLVED"]
     for rule in RULES:
+        if trigger_event_type is not None and trigger_event_type not in rule.match:
+            continue
         matches = [event for event in relevant if event.event_type in rule.match]
         if all(any(event.event_type == event_type for event in matches) for event_type in rule.match):
             return CorrelationResult(f"corr-{uuid4().hex[:10]}", vessel_id, rule.title, rule.severity, tuple(event.event_id for event in matches), rule.description, datetime.now(timezone.utc), rule.systems)

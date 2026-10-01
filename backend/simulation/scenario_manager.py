@@ -40,12 +40,12 @@ SCENARIOS = {
         ScenarioStep("UNAUTHORIZED_ACCESS", EventCategory.PHYSICAL, Severity.HIGH, "Access Control", "Unauthorized access in a restricted area."),
         ScenarioStep("CAMERA_OFFLINE", EventCategory.PHYSICAL, Severity.HIGH, "CCTV", "Nearby camera stopped responding."),
     )),
-    "navigation-anomaly": Scenario("Navigation Anomaly Simulation", "meridian", (
+    "navigation-anomaly": Scenario("Navigation Anomaly Simulation", "atlantic-trader", (
         ScenarioStep("GPS_ANOMALY", EventCategory.VESSEL_SYSTEM, Severity.MEDIUM, "GPS", "GPS position variance exceeds tolerance."),
         ScenarioStep("AIS_ANOMALY", EventCategory.VESSEL_SYSTEM, Severity.MEDIUM, "AIS", "AIS report is inconsistent."),
         ScenarioStep("COMMUNICATION_INSTABILITY", EventCategory.VESSEL_SYSTEM, Severity.HIGH, "Edge Gateway", "Communication instability detected."),
     )),
-    "fire-emergency": Scenario("Fire Emergency Simulation", "northstar", (
+    "fire-emergency": Scenario("Fire Emergency Simulation", "northern-star", (
         ScenarioStep("SMOKE_DETECTED", EventCategory.ENVIRONMENTAL, Severity.HIGH, "Smoke Sensor", "Smoke detected in a simulated zone."),
         ScenarioStep("FIRE_ALARM", EventCategory.ENVIRONMENTAL, Severity.CRITICAL, "Fire Panel", "Fire alarm activated in a simulated zone."),
         ScenarioStep("TEMPERATURE_HIGH", EventCategory.ENVIRONMENTAL, Severity.HIGH, "Temperature Sensor", "Temperature exceeds simulated threshold."),

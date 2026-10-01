@@ -1,5 +1,12 @@
 import * as store from "./store";
-import { resetBackendSimulation, runBackendScenario, updateBackendIncident } from "./backend";
+import {
+  acknowledgeBackendEvent,
+  addBackendIncidentNote,
+  createBackendIncident,
+  resetBackendSimulation,
+  runBackendScenario,
+  updateBackendIncident,
+} from "./backend";
 import type {
   AccessRecord,
   Camera,
@@ -30,19 +37,20 @@ export const vesselService = {
 };
 
 export const cameraService = {
-  list: (vesselId: string | "all" = "all"): Camera[] =>
-    scope(store.getState().cameras, vesselId),
+  list: (vesselId: string | "all" = "all"): Camera[] => scope(store.getState().cameras, vesselId),
 };
 
 export const sensorService = {
-  list: (vesselId: string | "all" = "all"): Sensor[] =>
-    scope(store.getState().sensors, vesselId),
+  list: (vesselId: string | "all" = "all"): Sensor[] => scope(store.getState().sensors, vesselId),
 };
 
 export const eventService = {
   list: (vesselId: string | "all" = "all", limit = 100): SecurityEvent[] =>
     scope(store.getState().events, vesselId).slice(0, limit),
-  acknowledge: (id: string) => store.acknowledgeEvent(id),
+  acknowledge: (id: string) => {
+    store.acknowledgeEvent(id);
+    void acknowledgeBackendEvent(id, store.getState().operator.name).catch(() => undefined);
+  },
 };
 
 export const incidentService = {
@@ -56,14 +64,25 @@ export const incidentService = {
     system: string;
     severity: Severity;
     assignee: string;
-  }) => store.createIncident(input),
+  }) => {
+    const incident = store.createIncident(input);
+    void createBackendIncident(input).catch(() => undefined);
+    return incident;
+  },
   setStatus: (id: string, status: IncidentStatus) => {
     store.setIncidentStatus(id, status);
-    void updateBackendIncident(id, status).catch(() => undefined);
+    void updateBackendIncident(id, { status }, store.getState().operator.name).catch(
+      () => undefined,
+    );
   },
-  update: (id: string, patch: Partial<Pick<Incident, "severity" | "assignee" | "status">>) =>
-    store.updateIncident(id, patch),
-  addNote: (id: string, body: string, author: string) => store.addIncidentNote(id, body, author),
+  update: (id: string, patch: Partial<Pick<Incident, "severity" | "assignee" | "status">>) => {
+    store.updateIncident(id, patch);
+    void updateBackendIncident(id, patch, store.getState().operator.name).catch(() => undefined);
+  },
+  addNote: (id: string, body: string, author: string) => {
+    store.addIncidentNote(id, body, author);
+    void addBackendIncidentNote(id, body, author).catch(() => undefined);
+  },
 };
 
 export const securityService = {
@@ -100,14 +119,13 @@ export const securityService = {
       cyberTotal: cyber.length,
       unauthorizedAccess: access.filter((a) => a.result !== "authorized").length,
       avgScore: avg,
-      fleetState:
-        vessels.some((v) => v.securityState === "critical")
-          ? ("critical" as const)
-          : vessels.some((v) => v.securityState === "warning")
-            ? ("warning" as const)
-            : vessels.some((v) => v.securityState === "elevated")
-              ? ("elevated" as const)
-              : ("secure" as const),
+      fleetState: vessels.some((v) => v.securityState === "critical")
+        ? ("critical" as const)
+        : vessels.some((v) => v.securityState === "warning")
+          ? ("warning" as const)
+          : vessels.some((v) => v.securityState === "elevated")
+            ? ("elevated" as const)
+            : ("secure" as const),
     };
   },
 };
@@ -115,8 +133,7 @@ export const securityService = {
 export const simulationService = {
   scenarios: store.SCENARIOS,
   trigger: async (id: store.ScenarioId, vesselId: string) => {
-    void vesselId;
-    return runBackendScenario(id);
+    return runBackendScenario(id, vesselId);
   },
   log: () => store.getState().simLog,
   reset: async () => resetBackendSimulation(),

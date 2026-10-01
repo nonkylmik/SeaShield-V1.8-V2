@@ -16,6 +16,7 @@ import { Route as CybersecurityRouteImport } from './routes/cybersecurity'
 import { Route as FleetRouteImport } from './routes/fleet'
 import { Route as IncidentsRouteImport } from './routes/incidents'
 import { Route as ReportsRouteImport } from './routes/reports'
+import { Route as SafetyRoundsRouteImport } from './routes/safety-rounds'
 import { Route as SensorsRouteImport } from './routes/sensors'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as VesselsIndexRouteImport } from './routes/vessels.index'
@@ -56,6 +57,11 @@ const ReportsRoute = ReportsRouteImport.update({
   path: '/reports',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SafetyRoundsRoute = SafetyRoundsRouteImport.update({
+  id: '/safety-rounds',
+  path: '/safety-rounds',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SensorsRoute = SensorsRouteImport.update({
   id: '/sensors',
   path: '/sensors',
@@ -85,6 +91,7 @@ export interface FileRoutesByFullPath {
   '/fleet': typeof FleetRoute
   '/incidents': typeof IncidentsRoute
   '/reports': typeof ReportsRoute
+  '/safety-rounds': typeof SafetyRoundsRoute
   '/sensors': typeof SensorsRoute
   '/settings': typeof SettingsRoute
   '/vessels/$vesselId': typeof VesselsVesselIdRoute
@@ -98,6 +105,7 @@ export interface FileRoutesByTo {
   '/fleet': typeof FleetRoute
   '/incidents': typeof IncidentsRoute
   '/reports': typeof ReportsRoute
+  '/safety-rounds': typeof SafetyRoundsRoute
   '/sensors': typeof SensorsRoute
   '/settings': typeof SettingsRoute
   '/vessels/$vesselId': typeof VesselsVesselIdRoute
@@ -112,6 +120,7 @@ export interface FileRoutesById {
   '/fleet': typeof FleetRoute
   '/incidents': typeof IncidentsRoute
   '/reports': typeof ReportsRoute
+  '/safety-rounds': typeof SafetyRoundsRoute
   '/sensors': typeof SensorsRoute
   '/settings': typeof SettingsRoute
   '/vessels/$vesselId': typeof VesselsVesselIdRoute
@@ -127,6 +136,7 @@ export interface FileRouteTypes {
     | '/fleet'
     | '/incidents'
     | '/reports'
+    | '/safety-rounds'
     | '/sensors'
     | '/settings'
     | '/vessels/$vesselId'
@@ -140,6 +150,7 @@ export interface FileRouteTypes {
     | '/fleet'
     | '/incidents'
     | '/reports'
+    | '/safety-rounds'
     | '/sensors'
     | '/settings'
     | '/vessels/$vesselId'
@@ -153,6 +164,7 @@ export interface FileRouteTypes {
     | '/fleet'
     | '/incidents'
     | '/reports'
+    | '/safety-rounds'
     | '/sensors'
     | '/settings'
     | '/vessels/$vesselId'
@@ -167,6 +179,7 @@ export interface RootRouteChildren {
   FleetRoute: typeof FleetRoute
   IncidentsRoute: typeof IncidentsRoute
   ReportsRoute: typeof ReportsRoute
+  SafetyRoundsRoute: typeof SafetyRoundsRoute
   SensorsRoute: typeof SensorsRoute
   SettingsRoute: typeof SettingsRoute
   VesselsVesselIdRoute: typeof VesselsVesselIdRoute
@@ -224,6 +237,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ReportsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/safety-rounds': {
+      id: '/safety-rounds'
+      path: '/safety-rounds'
+      fullPath: '/safety-rounds'
+      preLoaderRoute: typeof SafetyRoundsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/sensors': {
       id: '/sensors'
       path: '/sensors'
@@ -263,6 +283,7 @@ const rootRouteChildren: RootRouteChildren = {
   FleetRoute: FleetRoute,
   IncidentsRoute: IncidentsRoute,
   ReportsRoute: ReportsRoute,
+  SafetyRoundsRoute: SafetyRoundsRoute,
   SensorsRoute: SensorsRoute,
   SettingsRoute: SettingsRoute,
   VesselsVesselIdRoute: VesselsVesselIdRoute,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from uuid import uuid4
 
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
@@ -66,6 +67,15 @@ def list_incident_records(db: Session, vessel_id: str | None = None) -> list[Inc
     return list(db.scalars(query).all())
 
 
+def next_incident_id(db: Session) -> str:
+    numbers = []
+    for incident in db.scalars(select(IncidentRecord.incident_id)).all():
+        suffix = incident.rsplit("-", 1)[-1]
+        if suffix.isdigit():
+            numbers.append(int(suffix))
+    return f"INC-{max([240, *numbers]) + 1:04d}"
+
+
 def get_related_event_ids(db: Session, incident_id: str) -> list[str]:
     rows = db.scalars(select(IncidentEventLink.event_id).where(IncidentEventLink.incident_id == incident_id)).all()
     return list(rows)
@@ -108,7 +118,7 @@ def close_open_incident_records(db: Session, *, status: str, note: str) -> int:
 
 
 def add_incident_note(db: Session, incident_id: str, *, author: str, body: str) -> IncidentNoteRecord:
-    note = IncidentNoteRecord(note_id=f"NOTE-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}-{abs(hash(incident_id + body)) % 100000:05d}", incident_id=incident_id, author=author, body=body)
+    note = IncidentNoteRecord(note_id=f"NOTE-{uuid4().hex}", incident_id=incident_id, author=author, body=body)
     db.add(note)
     db.commit()
     db.refresh(note)

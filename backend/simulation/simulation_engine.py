@@ -59,7 +59,25 @@ class SimulationEngine:
                 if camera.vessel_id == event.vessel_id:
                     camera.online = False
                     camera.recording = False
-        result = correlate(self.events, event.vessel_id)
+        result = correlate(self.events, event.vessel_id, event.event_type)
+        if result:
+            incident = self.incidents.create_from_correlation(result)
+            self._emit("incident_created", {"incident": incident.model_dump(mode="json")})
+        self.recalculate()
+        return TickResult(event, result)
+
+    def inject(self, vessel_id: str, event_type: str) -> TickResult:
+        if not any(vessel.id == vessel_id for vessel in self.vessels):
+            raise KeyError(vessel_id)
+        event = self.generator.create(vessel_id, event_type)
+        self.events.insert(0, event)
+        self._emit("security_event", {"event": event.model_dump(mode="json")})
+        if event.event_type == "CAMERA_OFFLINE":
+            for camera in self.cameras:
+                if camera.vessel_id == vessel_id:
+                    camera.online = False
+                    camera.recording = False
+        result = correlate(self.events, vessel_id, event.event_type)
         if result:
             incident = self.incidents.create_from_correlation(result)
             self._emit("incident_created", {"incident": incident.model_dump(mode="json")})

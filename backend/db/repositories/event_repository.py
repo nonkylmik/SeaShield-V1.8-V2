@@ -123,3 +123,15 @@ def acknowledged_event_ids(db: Session, event_ids: list[str]) -> set[str]:
         return set()
     rows = db.scalars(select(EventAcknowledgementRecord.event_id).where(EventAcknowledgementRecord.event_id.in_(event_ids))).all()
     return set(rows)
+
+
+def resolve_safety_finding_events(db: Session, finding_id: str) -> int:
+    result = db.execute(
+        update(SecurityEventRecord)
+        .where(
+            SecurityEventRecord.event_metadata["finding_id"].as_string() == finding_id,
+            SecurityEventRecord.status != "RESOLVED",
+        )
+        .values(status="RESOLVED")
+    )
+    return result.rowcount or 0

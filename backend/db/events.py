@@ -43,10 +43,19 @@ def from_record(record: SecurityEventRecord) -> SecurityEvent:
     )
 
 
-def create_event(db: Session, event: SecurityEvent, scenario: str | None = None) -> SecurityEventRecord:
+def create_event(
+    db: Session,
+    event: SecurityEvent,
+    scenario: str | None = None,
+    *,
+    commit: bool = True,
+) -> SecurityEventRecord:
     record = to_record(event, scenario)
     db.add(record)
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     db.refresh(record)
     return record
 

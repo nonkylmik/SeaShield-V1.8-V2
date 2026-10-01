@@ -63,6 +63,7 @@ class SafetyCheckpointPatch(BaseModel):
     status: SafetyCheckpointStatus | None = None
     severity: SafetySeverity | None = None
     notes: str | None = None
+    completed_by: str | None = None
 
 
 class SafetyFindingCreate(BaseModel):
@@ -83,5 +84,6 @@ class SafetyFindingUpdate(BaseModel):
     status: SafetyFindingStatus | None = None
     severity: SafetySeverity | None = None
     assigned_to: str | None = None
+    due_date: datetime | None = None
     resolution_notes: str | None = None
     notes: str | None = None

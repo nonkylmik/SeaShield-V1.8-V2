@@ -26,9 +26,14 @@ class ConnectionManager:
         self.add_client(websocket)
 
     async def disconnect(self, websocket: WebSocket) -> None:
+        """Forget the client and close only if both sides are still connected."""
         self.remove_client(websocket)
-        if websocket.application_state != WebSocketState.DISCONNECTED:
+        if websocket.client_state == WebSocketState.DISCONNECTED or websocket.application_state == WebSocketState.DISCONNECTED:
+            return
+        try:
             await websocket.close()
+        except RuntimeError:
+            pass
 
     async def broadcast(self, message: dict[str, Any]) -> None:
         dead_clients: list[WebSocket] = []
