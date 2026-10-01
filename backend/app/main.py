@@ -13,16 +13,32 @@ from auth import SESSION_COOKIE, SESSION_TTL_SECONDS, auth_required, authenticat
 from db.database import Base, SessionLocal, engine as db_engine, get_db
 from db.events import create_event, delete_event, from_record, get_event, list_events, load_events
 from db.models import IncidentRecord, VesselRecord
-from db.repositories.event_repository import acknowledge_event, acknowledged_event_ids, create_event_record, list_event_records, resolve_all_open_events, set_event_status
-from db.repositories.incident_repository import add_incident_activity, add_incident_note, close_open_incident_records, create_incident_record, get_incident_record, get_related_event_ids, list_incident_activity, list_incident_notes, list_incident_records, update_incident_fields, update_incident_record
-from db.repositories.safety_repository import InvalidRoundTransition, cancel_safety_round, complete_safety_round, create_safety_finding, create_safety_round, get_safety_checkpoint, get_safety_round, list_safety_checkpoints, list_safety_rounds, start_safety_round, update_safety_checkpoint, update_safety_finding
-from db.repositories.security_repository import append_security_score, latest_security_score
+from db.repositories.event_repository import create_event_record, list_event_records
+from db.repositories.incident_repository import create_incident_record, get_incident_record, get_related_event_ids, list_incident_records
+from db.repositories.safety_repository import (
+    cancel_safety_round,
+    complete_safety_round,
+    create_safety_finding,
+    create_safety_round,
+    finding_response,
+    get_safety_checkpoint,
+    get_safety_finding,
+    get_safety_round,
+    list_safety_checkpoints,
+    list_safety_findings,
+    list_safety_rounds,
+    round_response,
+    start_safety_round,
+    update_safety_checkpoint,
+    update_safety_finding,
+)
+from db.repositories.security_repository import append_security_score, list_security_score_history
 from db.repositories.vessel_repository import get_vessel_record, list_vessel_records, to_vessel_model, upsert_vessel_record
 from models.events import EventCategory, SecurityEvent, Severity
-from models.incidents import Incident, IncidentCreate, IncidentNoteCreate, IncidentStatus, IncidentUpdate
-from models.safety_rounds import SafetyCheckpointPatch, SafetyCheckpointStatus, SafetyFindingCreate, SafetyFindingUpdate, SafetyRoundCreate
+from models.incidents import Incident, IncidentStatus, IncidentUpdate
+from models.safety_rounds import SafetyCheckpointStatus, SafetyFindingCreate, SafetyFindingUpdate, SafetyRoundCreate
 from schemas.auth import LoginRequest, LoginResponse, UserResponse
-from schemas.security_events import EventAcknowledge, SecurityEventCreate, SecurityEventResponse
+from schemas.security_events import SecurityEventCreate, SecurityEventResponse
 from simulation.simulation_engine import SimulationEngine
 from websocket_manager import ConnectionManager
 
@@ -120,6 +136,22 @@ def sync_engine_from_db(db: Session) -> None:
     persist_vessel_scores(db)
 
 
+def create_safety_event_record(db: Session, *, vessel_id: str, event_type: str, title: str, description: str, severity: str, source: str = "Safety Round") -> SecurityEvent:
+    event = SecurityEvent(
+        event_id=f"{event_type}-{uuid4().hex}",
+        vessel_id=vessel_id,
+        event_type=event_type,
+        category=EventCategory.PHYSICAL,
+        severity=Severity[severity.upper()],
+        source=source,
+        description=description,
+        title=title,
+        status="OPEN",
+        metadata={"source": "safety_round"},
+    )
+    return create_event(db, event, "safety-rounds")
+
+
 @app.on_event("startup")
 def initialize_database() -> None:
     validate_auth_configuration()
@@ -133,9 +165,9 @@ def health() -> dict[str, str]:
     try:
         with SessionLocal() as db:
             db.execute(text("SELECT 1"))
-        return {"status": "ok", "database": "connected", "mode": "simulation", "version": "1.7.0"}
+        return {"status": "ok", "database": "connected", "mode": "simulation", "version": APP_VERSION}
     except Exception:
-        return {"status": "degraded", "database": "unavailable", "mode": "simulation", "version": "1.7.0"}
+        return {"status": "degraded", "database": "unavailable", "mode": "simulation", "version": APP_VERSION}
 
 
 @app.post("/api/auth/login", response_model=LoginResponse)
@@ -306,8 +338,261 @@ def simulation_status():
     return {"scenario": engine.scenarios.name, "status": engine.scenarios.status, "index": engine.scenarios.index}
 
 
+@app.get("/api/v1/safety-rounds")
+def get_safety_rounds_endpoint(vessel_id: str | None = None, status: str | None = None, round_type: str | None = None, db: Session = Depends(get_db)):
+    return [round_response(record, list_safety_checkpoints(db, record.round_id)) for record in list_safety_rounds(db, vessel_id=vessel_id, status=status, round_type=round_type)]
+
+
+@app.get("/api/v1/safety-rounds/{round_id}")
+def get_safety_round_endpoint(round_id: str, db: Session = Depends(get_db)):
+    record = get_safety_round(db, round_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Safety round not found")
+    return round_response(record, list_safety_checkpoints(db, record.round_id))
+
+
+@app.post("/api/v1/safety-rounds", status_code=201)
+async def create_safety_round_endpoint(payload: SafetyRoundCreate, db: Session = Depends(get_db)):
+    round_payload = create_safety_round(
+        db,
+        vessel_id=payload.vessel_id,
+        round_type=payload.round_type,
+        assigned_to=payload.assigned_to,
+        planned_start=payload.planned_start,
+        notes=payload.notes,
+        template_name=payload.template_name or payload.round_type,
+    )
+    await broadcast_status_message("safety_round_started", {"round_id": round_payload["round_id"], "vessel_id": payload.vessel_id, "status": "PLANNED"})
+    return round_payload
+
+
+@app.post("/api/v1/safety-rounds/{round_id}/start")
+async def start_safety_round_endpoint(round_id: str, db: Session = Depends(get_db)):
+    try:
+        record = start_safety_round(db, round_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if record is None:
+        raise HTTPException(status_code=404, detail="Safety round not found")
+    await broadcast_status_message("safety_round_started", {"round_id": round_id, "vessel_id": record.vessel_id, "status": record.status})
+    create_safety_event_record(db, vessel_id=record.vessel_id, event_type="SAFETY_ROUND_STARTED", title=f"Safety round {record.round_id} started", description=f"{record.round_type} began for {record.vessel_id}.", severity="INFO", source="Safety Round")
+    return round_response(record, list_safety_checkpoints(db, record.round_id))
+
+
+@app.post("/api/v1/safety-rounds/{round_id}/complete")
+async def complete_safety_round_endpoint(round_id: str, db: Session = Depends(get_db)):
+    record = get_safety_round(db, round_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Safety round not found")
+    try:
+        record = complete_safety_round(db, round_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    await broadcast_status_message("safety_round_completed", {"round_id": round_id, "vessel_id": record.vessel_id, "status": record.status})
+    create_safety_event_record(db, vessel_id=record.vessel_id, event_type="SAFETY_ROUND_COMPLETED", title=f"Safety round {record.round_id} completed", description=f"{record.round_type} completed for {record.vessel_id}.", severity="LOW", source="Safety Round")
+    return round_response(record, list_safety_checkpoints(db, record.round_id))
+
+
+@app.post("/api/v1/safety-rounds/{round_id}/cancel")
+async def cancel_safety_round_endpoint(round_id: str, db: Session = Depends(get_db)):
+    try:
+        record = cancel_safety_round(db, round_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if record is None:
+        raise HTTPException(status_code=404, detail="Safety round not found")
+    await broadcast_status_message("safety_round_cancelled", {"round_id": round_id, "status": record.status})
+    return round_response(record, list_safety_checkpoints(db, record.round_id))
+
+
+@app.get("/api/v1/safety-rounds/{round_id}/checkpoints")
+def get_safety_round_checkpoints_endpoint(round_id: str, db: Session = Depends(get_db)):
+    if get_safety_round(db, round_id) is None:
+        raise HTTPException(status_code=404, detail="Safety round not found")
+    return [
+        {
+            "id": checkpoint.id,
+            "checkpoint_id": checkpoint.checkpoint_id,
+            "round_id": checkpoint.round_id,
+            "name": checkpoint.name,
+            "category": checkpoint.category,
+            "location": checkpoint.location,
+            "description": checkpoint.description,
+            "sequence": checkpoint.sequence,
+            "required": checkpoint.required,
+            "status": checkpoint.status,
+            "severity": checkpoint.severity,
+            "notes": checkpoint.notes,
+            "completed_at": checkpoint.completed_at.isoformat() if checkpoint.completed_at else None,
+            "completed_by": checkpoint.completed_by,
+        }
+        for checkpoint in list_safety_checkpoints(db, round_id)
+    ]
+
+
+@app.patch("/api/v1/safety-rounds/{round_id}/checkpoints/{checkpoint_id}")
+async def update_safety_round_checkpoint_endpoint(round_id: str, checkpoint_id: str, payload: dict, db: Session = Depends(get_db)):
+    checkpoint = get_safety_checkpoint(db, round_id, checkpoint_id)
+    if checkpoint is None:
+        raise HTTPException(status_code=404, detail="Checkpoint not found")
+    try:
+        updated = update_safety_checkpoint(
+            db,
+            round_id=round_id,
+            checkpoint_id=checkpoint_id,
+            status=payload.get("status", checkpoint.status),
+            severity=payload.get("severity", checkpoint.severity),
+            notes=payload.get("notes", checkpoint.notes),
+            completed_by=payload.get("completed_by", checkpoint.completed_by),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Checkpoint not found")
+    if updated.status in {"WARNING", "FAIL"}:
+        finding = create_safety_finding(
+            db,
+            round_id=round_id,
+            checkpoint_id=checkpoint_id,
+            vessel_id=get_safety_round(db, round_id).vessel_id,
+            title=f"{updated.name} requires attention",
+            description=updated.notes or updated.description,
+            location=updated.location,
+            severity=updated.severity,
+            created_by=updated.completed_by or "Operator",
+            assigned_to=get_safety_round(db, round_id).assigned_to,
+        )
+        event_type = "SAFETY_CHECKPOINT_FAILED" if updated.status == "FAIL" else "SAFETY_CHECKPOINT_WARNING"
+        create_safety_event_record(db, vessel_id=get_safety_round(db, round_id).vessel_id, event_type=event_type, title=f"{updated.name} marked {updated.status}", description=f"Checkpoint {updated.name} in {updated.location} marked {updated.status}.", severity=updated.severity, source="Safety Round")
+        await broadcast_status_message("safety_finding_created", {"round_id": round_id, "checkpoint_id": checkpoint_id, "finding_id": finding.finding_id, "severity": finding.severity})
+    await broadcast_status_message("safety_checkpoint_updated", {"round_id": round_id, "checkpoint_id": checkpoint_id, "status": updated.status, "severity": updated.severity})
+    return {
+        "id": updated.id,
+        "checkpoint_id": updated.checkpoint_id,
+        "round_id": updated.round_id,
+        "status": updated.status,
+        "severity": updated.severity,
+        "notes": updated.notes,
+        "completed_by": updated.completed_by,
+    }
+
+
+@app.get("/api/v1/safety-findings")
+def get_safety_findings_endpoint(round_id: str | None = None, vessel_id: str | None = None, status: str | None = None, db: Session = Depends(get_db)):
+    findings = list_safety_findings(db, round_id=round_id, vessel_id=vessel_id, status=status)
+    return [
+        {
+            "id": finding.id,
+            "finding_id": finding.finding_id,
+            "round_id": finding.round_id,
+            "checkpoint_id": finding.checkpoint_id,
+            "vessel_id": finding.vessel_id,
+            "title": finding.title,
+            "description": finding.description,
+            "location": finding.location,
+            "severity": finding.severity,
+            "status": finding.status,
+            "created_by": finding.created_by,
+            "assigned_to": finding.assigned_to,
+            "due_date": finding.due_date.isoformat() if finding.due_date else None,
+            "resolution_notes": finding.resolution_notes,
+            "created_at": finding.created_at.isoformat(),
+            "updated_at": finding.updated_at.isoformat(),
+            "resolved_at": finding.resolved_at.isoformat() if finding.resolved_at else None,
+        }
+        for finding in findings
+    ]
+
+
+@app.get("/api/v1/safety-findings/{finding_id}")
+def get_safety_finding_endpoint(finding_id: str, db: Session = Depends(get_db)):
+    finding = get_safety_finding(db, finding_id)
+    if finding is None:
+        raise HTTPException(status_code=404, detail="Safety finding not found")
+    return {
+        "id": finding.id,
+        "finding_id": finding.finding_id,
+        "round_id": finding.round_id,
+        "checkpoint_id": finding.checkpoint_id,
+        "vessel_id": finding.vessel_id,
+        "title": finding.title,
+        "description": finding.description,
+        "location": finding.location,
+        "severity": finding.severity,
+        "status": finding.status,
+        "created_by": finding.created_by,
+        "assigned_to": finding.assigned_to,
+        "due_date": finding.due_date.isoformat() if finding.due_date else None,
+        "resolution_notes": finding.resolution_notes,
+        "created_at": finding.created_at.isoformat(),
+        "updated_at": finding.updated_at.isoformat(),
+        "resolved_at": finding.resolved_at.isoformat() if finding.resolved_at else None,
+    }
+
+
+@app.post("/api/v1/safety-findings", status_code=201)
+async def create_safety_finding_endpoint(payload: SafetyFindingCreate, db: Session = Depends(get_db)):
+    record = create_safety_finding(
+        db,
+        round_id=payload.round_id,
+        checkpoint_id=payload.checkpoint_id,
+        vessel_id=payload.vessel_id,
+        title=payload.title,
+        description=payload.description,
+        location=payload.location,
+        severity=payload.severity.value,
+        created_by=payload.created_by,
+        assigned_to=payload.assigned_to,
+        due_date=payload.due_date,
+        resolution_notes=payload.resolution_notes,
+    )
+    await broadcast_status_message("safety_finding_created", {"round_id": payload.round_id, "checkpoint_id": payload.checkpoint_id, "finding_id": record.finding_id, "severity": record.severity})
+    return {
+        "id": record.id,
+        "finding_id": record.finding_id,
+        "round_id": record.round_id,
+        "checkpoint_id": record.checkpoint_id,
+        "vessel_id": record.vessel_id,
+        "title": record.title,
+        "description": record.description,
+        "location": record.location,
+        "severity": record.severity,
+        "status": record.status,
+    }
+
+
+@app.patch("/api/v1/safety-findings/{finding_id}")
+async def update_safety_finding_endpoint(finding_id: str, payload: SafetyFindingUpdate, db: Session = Depends(get_db)):
+    record = get_safety_finding(db, finding_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Safety finding not found")
+    updated = update_safety_finding(
+        db,
+        finding_id=finding_id,
+        status=payload.status.value if payload.status is not None else None,
+        severity=payload.severity.value if payload.severity is not None else None,
+        assigned_to=payload.assigned_to,
+        resolution_notes=payload.resolution_notes,
+    )
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Safety finding not found")
+    await broadcast_status_message("safety_finding_updated", {"finding_id": updated.finding_id, "status": updated.status, "severity": updated.severity})
+    return {
+        "id": updated.id,
+        "finding_id": updated.finding_id,
+        "round_id": updated.round_id,
+        "status": updated.status,
+        "severity": updated.severity,
+        "assigned_to": updated.assigned_to,
+        "resolution_notes": updated.resolution_notes,
+    }
+
+
 @app.websocket("/ws/security")
 async def websocket_security(websocket: WebSocket):
+    if auth_required() and read_session(websocket.cookies.get(SESSION_COOKIE)) is None:
+        await websocket.close(code=4401, reason="Not authenticated")
+        return
     manager = app.state.websocket_manager
     await manager.connect(websocket)
     try:

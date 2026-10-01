@@ -1,16 +1,19 @@
 import os
+import os
 from pathlib import Path
 
 import pytest
 
+TEST_DATABASE_PATH = Path(__file__).resolve().parents[1] / "seashield_test.db"
+os.environ["DATABASE_URL"] = f"sqlite:///{TEST_DATABASE_PATH.as_posix()}"
 
-@pytest.fixture(autouse=True)
-def isolate_backend_db(monkeypatch):
-    """Keep tests isolated from a developer-local SQLite file."""
-    db_path = Path(__file__).resolve().parents[1] / "seashield_test.db"
-    monkeypatch.setenv("SEA_SHIELD_DB_PATH", str(db_path))
-    if db_path.exists():
-        db_path.unlink()
+from db.database import engine
+
+
+@pytest.fixture(scope="session", autouse=True)
+def isolate_backend_db():
+    engine.dispose()
+    TEST_DATABASE_PATH.unlink(missing_ok=True)
     yield
-    if db_path.exists():
-        db_path.unlink()
+    engine.dispose()
+    TEST_DATABASE_PATH.unlink(missing_ok=True)

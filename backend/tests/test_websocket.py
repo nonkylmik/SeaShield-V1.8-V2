@@ -1,7 +1,10 @@
 import asyncio
 
+import pytest
 from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
+from auth import DEMO_USER, SESSION_COOKIE, create_session
 from app.main import app
 
 
@@ -23,3 +26,17 @@ def test_websocket_manager_tracks_disconnects():
     with TestClient(app).websocket_connect("/ws/security") as websocket:
         assert manager.get_client_count() == initial + 1
     assert manager.get_client_count() == initial
+
+
+def test_websocket_requires_a_valid_session_when_auth_is_enabled(monkeypatch):
+    monkeypatch.setattr("app.main.auth_required", lambda: True)
+    client = TestClient(app)
+
+    with pytest.raises(WebSocketDisconnect) as disconnect:
+        with client.websocket_connect("/ws/security"):
+            pass
+    assert disconnect.value.code == 4401
+
+    client.cookies.set(SESSION_COOKIE, create_session(DEMO_USER))
+    with client.websocket_connect("/ws/security"):
+        assert app.state.websocket_manager.get_client_count() >= 1
