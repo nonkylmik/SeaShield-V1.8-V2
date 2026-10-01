@@ -1,0 +1,321 @@
+From c090725d4676d486df0d07bea52a8ec254b028fb Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 24 Sep 2026 09:34:40 +0300
+Subject: [PATCH 3/8] Safety rounds: unique event IDs, lifecycle rules and
+ validated checkpoint PATCH
+
+- Safety event and finding IDs use a uuid suffix instead of second-resolution
+  timestamp + hash/count. Two checkpoints failed in the same second (or a
+  round restarted within a second) raised IntegrityError -> HTTP 500 after the
+  finding had already been written.
+- Round lifecycle is enforced (HTTP 409 otherwise):
+  start: PLANNED/OVERDUE -> IN_PROGRESS; complete/cancel: from PLANNED,
+  IN_PROGRESS or OVERDUE; checkpoints can only be changed while the round is
+  open. Cancelled/completed rounds can no longer be restarted or edited.
+- Checkpoint PATCH uses a Pydantic model (SafetyCheckpointPatch) instead of a
+  raw dict: invalid status/severity -> 422, omitted fields keep their value.
+- Tests: tests/test_safety_round_rules.py.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01F8gdxt3tGbrWATzufnb6wB
+---
+ backend/app/main.py                          | 37 ++++++----
+ backend/db/repositories/safety_repository.py | 20 +++++-
+ backend/models/safety_rounds.py              |  9 +++
+ backend/tests/test_safety_round_rules.py     | 73 ++++++++++++++++++++
+ 4 files changed, 126 insertions(+), 13 deletions(-)
+ create mode 100644 backend/tests/test_safety_round_rules.py
+
+diff --git a/backend/app/main.py b/backend/app/main.py
+index 235af57..01b03f4 100644
+--- a/backend/app/main.py
++++ b/backend/app/main.py
+@@ -1,4 +1,5 @@
+ from datetime import datetime, timezone
++from uuid import uuid4
+ 
+ from fastapi import Cookie, Depends, FastAPI, HTTPException, Query, Response, WebSocket, WebSocketDisconnect
+ from fastapi.middleware.cors import CORSMiddleware
+@@ -13,6 +14,7 @@ from db.models import IncidentRecord, VesselRecord
+ from db.repositories.event_repository import create_event_record, list_event_records, resolve_all_open_events, set_event_status
+ from db.repositories.incident_repository import close_open_incident_records, create_incident_record, get_incident_record, get_related_event_ids, list_incident_records, update_incident_record
+ from db.repositories.safety_repository import (
++    InvalidRoundTransition,
+     cancel_safety_round,
+     complete_safety_round,
+     create_safety_finding,
+@@ -32,7 +34,7 @@ from db.repositories.security_repository import append_security_score, list_secu
+ from db.repositories.vessel_repository import get_vessel_record, list_vessel_records, to_vessel_model, upsert_vessel_record
+ from models.events import EventCategory, SecurityEvent, Severity
+ from models.incidents import Incident, IncidentStatus, IncidentUpdate
+-from models.safety_rounds import SafetyCheckpointStatus, SafetyFindingCreate, SafetyFindingUpdate, SafetyRoundCreate
++from models.safety_rounds import SafetyCheckpointPatch, SafetyCheckpointStatus, SafetyFindingCreate, SafetyFindingUpdate, SafetyRoundCreate
+ from schemas.auth import LoginRequest, LoginResponse, UserResponse
+ from schemas.security_events import SecurityEventCreate, SecurityEventResponse
+ from simulation.simulation_engine import SimulationEngine
+@@ -92,7 +94,7 @@ async def broadcast_status_message(message_type: str, data: dict) -> None:
+ 
+ def create_safety_event_record(db: Session, *, vessel_id: str, event_type: str, title: str, description: str, severity: str, source: str = "Safety Round") -> SecurityEvent:
+     event = SecurityEvent(
+-        event_id=f"{event_type}-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}-{abs(hash(vessel_id)) % 10000}",
++        event_id=f"{event_type}-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}-{uuid4().hex[:8]}",
+         vessel_id=vessel_id,
+         event_type=event_type,
+         category=EventCategory.PHYSICAL,
+@@ -361,7 +363,10 @@ async def create_safety_round_endpoint(payload: SafetyRoundCreate, db: Session =
+ 
+ @app.post("/api/v1/safety-rounds/{round_id}/start")
+ async def start_safety_round_endpoint(round_id: str, db: Session = Depends(get_db)):
+-    record = start_safety_round(db, round_id)
++    try:
++        record = start_safety_round(db, round_id)
++    except InvalidRoundTransition as exc:
++        raise HTTPException(status_code=409, detail=str(exc)) from exc
+     if record is None:
+         raise HTTPException(status_code=404, detail="Safety round not found")
+     await broadcast_status_message("safety_round_started", {"round_id": round_id, "vessel_id": record.vessel_id, "status": record.status})
+@@ -376,6 +381,8 @@ async def complete_safety_round_endpoint(round_id: str, db: Session = Depends(ge
+         raise HTTPException(status_code=404, detail="Safety round not found")
+     try:
+         record = complete_safety_round(db, round_id)
++    except InvalidRoundTransition as exc:
++        raise HTTPException(status_code=409, detail=str(exc)) from exc
+     except ValueError as exc:
+         raise HTTPException(status_code=400, detail=str(exc)) from exc
+     await broadcast_status_message("safety_round_completed", {"round_id": round_id, "vessel_id": record.vessel_id, "status": record.status})
+@@ -385,7 +392,10 @@ async def complete_safety_round_endpoint(round_id: str, db: Session = Depends(ge
+ 
+ @app.post("/api/v1/safety-rounds/{round_id}/cancel")
+ async def cancel_safety_round_endpoint(round_id: str, db: Session = Depends(get_db)):
+-    record = cancel_safety_round(db, round_id)
++    try:
++        record = cancel_safety_round(db, round_id)
++    except InvalidRoundTransition as exc:
++        raise HTTPException(status_code=409, detail=str(exc)) from exc
+     if record is None:
+         raise HTTPException(status_code=404, detail="Safety round not found")
+     await broadcast_status_message("safety_round_cancelled", {"round_id": round_id, "status": record.status})
+@@ -418,20 +428,23 @@ def get_safety_round_checkpoints_endpoint(round_id: str, db: Session = Depends(g
+ 
+ 
+ @app.patch("/api/v1/safety-rounds/{round_id}/checkpoints/{checkpoint_id}")
+-async def update_safety_round_checkpoint_endpoint(round_id: str, checkpoint_id: str, payload: dict, db: Session = Depends(get_db)):
++async def update_safety_round_checkpoint_endpoint(round_id: str, checkpoint_id: str, payload: SafetyCheckpointPatch, db: Session = Depends(get_db)):
+     checkpoint = get_safety_checkpoint(db, round_id, checkpoint_id)
+     if checkpoint is None:
+         raise HTTPException(status_code=404, detail="Checkpoint not found")
++    round_record = get_safety_round(db, round_id)
+     try:
+         updated = update_safety_checkpoint(
+             db,
+             round_id=round_id,
+             checkpoint_id=checkpoint_id,
+-            status=payload.get("status", checkpoint.status),
+-            severity=payload.get("severity", checkpoint.severity),
+-            notes=payload.get("notes", checkpoint.notes),
+-            completed_by=payload.get("completed_by", checkpoint.completed_by),
++            status=payload.status.value if payload.status is not None else checkpoint.status,
++            severity=payload.severity.value if payload.severity is not None else checkpoint.severity,
++            notes=payload.notes if payload.notes is not None else checkpoint.notes,
++            completed_by=payload.completed_by if payload.completed_by is not None else checkpoint.completed_by,
+         )
++    except InvalidRoundTransition as exc:
++        raise HTTPException(status_code=409, detail=str(exc)) from exc
+     except ValueError as exc:
+         raise HTTPException(status_code=400, detail=str(exc)) from exc
+     if updated is None:
+@@ -441,16 +454,16 @@ async def update_safety_round_checkpoint_endpoint(round_id: str, checkpoint_id:
+             db,
+             round_id=round_id,
+             checkpoint_id=checkpoint_id,
+-            vessel_id=get_safety_round(db, round_id).vessel_id,
++            vessel_id=round_record.vessel_id,
+             title=f"{updated.name} requires attention",
+             description=updated.notes or updated.description,
+             location=updated.location,
+             severity=updated.severity,
+             created_by=updated.completed_by or "Operator",
+-            assigned_to=get_safety_round(db, round_id).assigned_to,
++            assigned_to=round_record.assigned_to,
+         )
+         event_type = "SAFETY_CHECKPOINT_FAILED" if updated.status == "FAIL" else "SAFETY_CHECKPOINT_WARNING"
+-        create_safety_event_record(db, vessel_id=get_safety_round(db, round_id).vessel_id, event_type=event_type, title=f"{updated.name} marked {updated.status}", description=f"Checkpoint {updated.name} in {updated.location} marked {updated.status}.", severity=updated.severity, source="Safety Round")
++        create_safety_event_record(db, vessel_id=round_record.vessel_id, event_type=event_type, title=f"{updated.name} marked {updated.status}", description=f"Checkpoint {updated.name} in {updated.location} marked {updated.status}.", severity=updated.severity, source="Safety Round")
+         await broadcast_status_message("safety_finding_created", {"round_id": round_id, "checkpoint_id": checkpoint_id, "finding_id": finding.finding_id, "severity": finding.severity})
+     await broadcast_status_message("safety_checkpoint_updated", {"round_id": round_id, "checkpoint_id": checkpoint_id, "status": updated.status, "severity": updated.severity})
+     return {
+diff --git a/backend/db/repositories/safety_repository.py b/backend/db/repositories/safety_repository.py
+index aeff9cb..f23a2f0 100644
+--- a/backend/db/repositories/safety_repository.py
++++ b/backend/db/repositories/safety_repository.py
+@@ -2,6 +2,7 @@ from __future__ import annotations
+ 
+ from datetime import datetime, timezone
+ from typing import Any
++from uuid import uuid4
+ 
+ from sqlalchemy import func, select
+ from sqlalchemy.orm import Session
+@@ -63,6 +64,17 @@ ROUND_TEMPLATE_MAP: dict[str, list[str]] = {
+ 
+ VALID_STATUSES = {"PASS", "WARNING", "FAIL", "NOT_APPLICABLE", "NOT_CHECKED"}
+ VALID_SEVERITIES = {"INFO", "LOW", "MEDIUM", "HIGH", "CRITICAL"}
++OPEN_ROUND_STATUSES = {"PLANNED", "IN_PROGRESS", "OVERDUE"}
++STARTABLE_ROUND_STATUSES = {"PLANNED", "OVERDUE"}
++
++
++class InvalidRoundTransition(ValueError):
++    """Raised when a safety round action is not allowed in the round's current status."""
++
++
++def _require_status(record: SafetyRoundRecord, allowed: set[str], action: str) -> None:
++    if record.status not in allowed:
++        raise InvalidRoundTransition(f"Cannot {action} safety round {record.round_id} in status {record.status}.")
+ 
+ 
+ def generate_round_id(db: Session) -> str:
+@@ -149,6 +161,7 @@ def start_safety_round(db: Session, round_id: str) -> SafetyRoundRecord | None:
+     record = get_safety_round(db, round_id)
+     if record is None:
+         return None
++    _require_status(record, STARTABLE_ROUND_STATUSES, "start")
+     record.status = "IN_PROGRESS"
+     record.started_at = record.started_at or datetime.now(timezone.utc)
+     record.updated_at = datetime.now(timezone.utc)
+@@ -161,6 +174,7 @@ def complete_safety_round(db: Session, round_id: str) -> SafetyRoundRecord | Non
+     record = get_safety_round(db, round_id)
+     if record is None:
+         return None
++    _require_status(record, OPEN_ROUND_STATUSES, "complete")
+     checkpoints = list_safety_checkpoints(db, round_id)
+     required_pending = [checkpoint for checkpoint in checkpoints if checkpoint.required and checkpoint.status not in {"PASS", "WARNING", "FAIL", "NOT_APPLICABLE"}]
+     if required_pending:
+@@ -177,6 +191,7 @@ def cancel_safety_round(db: Session, round_id: str) -> SafetyRoundRecord | None:
+     record = get_safety_round(db, round_id)
+     if record is None:
+         return None
++    _require_status(record, OPEN_ROUND_STATUSES, "cancel")
+     record.status = "CANCELLED"
+     record.updated_at = datetime.now(timezone.utc)
+     db.commit()
+@@ -206,6 +221,9 @@ def update_safety_checkpoint(
+     checkpoint = get_safety_checkpoint(db, round_id, checkpoint_id)
+     if checkpoint is None:
+         return None
++    round_record = get_safety_round(db, round_id)
++    if round_record is not None:
++        _require_status(round_record, OPEN_ROUND_STATUSES, "update checkpoints of")
+     normalized_status = status.upper()
+     normalized_severity = severity.upper()
+     if normalized_status not in VALID_STATUSES:
+@@ -261,7 +279,7 @@ def create_safety_finding(
+     if existing is not None:
+         return existing
+     record = SafetyFindingRecord(
+-        finding_id=f"SF-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}-{(db.scalar(select(func.count()).select_from(SafetyFindingRecord)) or 0) + 1:04d}",
++        finding_id=f"SF-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}-{uuid4().hex[:8]}",
+         round_id=round_id,
+         checkpoint_id=checkpoint_id,
+         vessel_id=vessel_id,
+diff --git a/backend/models/safety_rounds.py b/backend/models/safety_rounds.py
+index a4b68db..e803ac5 100644
+--- a/backend/models/safety_rounds.py
++++ b/backend/models/safety_rounds.py
+@@ -59,6 +59,15 @@ class SafetyCheckpointUpdate(BaseModel):
+     completed_by: str | None = None
+ 
+ 
++class SafetyCheckpointPatch(BaseModel):
++    """Partial checkpoint update: omitted fields keep their current value."""
++
++    status: SafetyCheckpointStatus | None = None
++    severity: SafetySeverity | None = None
++    notes: str | None = None
++    completed_by: str | None = None
++
++
+ class SafetyFindingCreate(BaseModel):
+     round_id: str
+     checkpoint_id: str | None = None
+diff --git a/backend/tests/test_safety_round_rules.py b/backend/tests/test_safety_round_rules.py
+new file mode 100644
+index 0000000..83a7054
+--- /dev/null
++++ b/backend/tests/test_safety_round_rules.py
+@@ -0,0 +1,73 @@
++"""Safety round lifecycle rules, validation and event ID uniqueness."""
++
++import pytest
++from fastapi.testclient import TestClient
++from sqlalchemy import create_engine
++from sqlalchemy.orm import sessionmaker
++
++from app.main import app
++from db.database import Base, get_db
++
++
++@pytest.fixture()
++def client(tmp_path):
++    database_engine = create_engine(f"sqlite:///{tmp_path / 'rounds.db'}", connect_args={"check_same_thread": False})
++    Base.metadata.create_all(database_engine)
++    sessions = sessionmaker(bind=database_engine, expire_on_commit=False)
++
++    def override_db():
++        with sessions() as session:
++            yield session
++
++    app.dependency_overrides[get_db] = override_db
++    with TestClient(app) as test_client:
++        yield test_client
++    app.dependency_overrides.clear()
++    Base.metadata.drop_all(database_engine)
++
++
++def new_round(client: TestClient) -> tuple[str, list[str]]:
++    payload = client.post("/api/v1/safety-rounds", json={"vessel_id": "calypso", "round_type": "Security Round"}).json()
++    return payload["round_id"], [item["checkpoint_id"] for item in payload["checkpoints"]]
++
++
++def test_two_failures_in_the_same_second_do_not_collide(client):
++    round_id, checkpoints = new_round(client)
++    assert client.post(f"/api/v1/safety-rounds/{round_id}/start").status_code == 200
++    for checkpoint_id in checkpoints[:3]:
++        response = client.patch(f"/api/v1/safety-rounds/{round_id}/checkpoints/{checkpoint_id}", json={"status": "FAIL", "severity": "HIGH"})
++        assert response.status_code == 200, response.text
++    assert len(client.get(f"/api/v1/safety-findings?round_id={round_id}").json()) == 3
++
++
++def test_round_state_machine(client):
++    round_id, checkpoints = new_round(client)
++    assert client.post(f"/api/v1/safety-rounds/{round_id}/start").status_code == 200
++    assert client.post(f"/api/v1/safety-rounds/{round_id}/start").status_code == 409
++    assert client.post(f"/api/v1/safety-rounds/{round_id}/cancel").json()["status"] == "CANCELLED"
++    assert client.post(f"/api/v1/safety-rounds/{round_id}/start").status_code == 409
++    assert client.post(f"/api/v1/safety-rounds/{round_id}/complete").status_code == 409
++    assert client.post(f"/api/v1/safety-rounds/{round_id}/cancel").status_code == 409
++    response = client.patch(f"/api/v1/safety-rounds/{round_id}/checkpoints/{checkpoints[0]}", json={"status": "PASS"})
++    assert response.status_code == 409
++
++
++def test_completed_round_is_read_only(client):
++    round_id, checkpoints = new_round(client)
++    for checkpoint_id in checkpoints:
++        client.patch(f"/api/v1/safety-rounds/{round_id}/checkpoints/{checkpoint_id}", json={"status": "PASS"})
++    assert client.post(f"/api/v1/safety-rounds/{round_id}/complete").status_code == 200
++    assert client.patch(f"/api/v1/safety-rounds/{round_id}/checkpoints/{checkpoints[0]}", json={"status": "FAIL"}).status_code == 409
++
++
++def test_checkpoint_patch_is_validated_and_partial(client):
++    round_id, checkpoints = new_round(client)
++    url = f"/api/v1/safety-rounds/{round_id}/checkpoints/{checkpoints[0]}"
++    assert client.patch(url, json={"status": "PASS", "severity": "BOGUS"}).status_code == 422
++    assert client.patch(url, json={"status": "MAYBE"}).status_code == 422
++    assert client.patch(url, json={"status": "WARNING", "severity": "MEDIUM", "notes": "Loose cable"}).status_code == 200
++    # omitted fields keep their values
++    response = client.patch(url, json={"completed_by": "Deck Officer"})
++    assert response.status_code == 200
++    body = response.json()
++    assert (body["status"], body["severity"], body["notes"]) == ("WARNING", "MEDIUM", "Loose cable")
+-- 
+2.43.0
+

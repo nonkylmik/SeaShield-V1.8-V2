@@ -8,7 +8,8 @@ from dataclasses import dataclass
 
 SESSION_COOKIE = "seashield_session"
 SESSION_TTL_SECONDS = 8 * 60 * 60
-SESSION_SECRET = os.getenv("SESSION_SECRET", "change-me-in-development")
+DEFAULT_SESSION_SECRET = "change-me-in-development"
+SESSION_SECRET = os.getenv("SESSION_SECRET", DEFAULT_SESSION_SECRET)
 DEMO_EMAIL = os.getenv("DEMO_USER_EMAIL", "operator@seashield.local")
 DEMO_PASSWORD = os.getenv("DEMO_USER_PASSWORD", "seashield-demo")
 
@@ -58,3 +59,12 @@ def read_session(token: str | None) -> User | None:
     if not hmac.compare_digest(signature, expected) or int(expires) < int(time.time()):
         return None
     return DEMO_USER if hmac.compare_digest(email.lower(), DEMO_USER.email.lower()) else None
+
+
+def auth_required() -> bool:
+    return os.getenv("AUTH_REQUIRED", "false").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def validate_auth_configuration() -> None:
+    if auth_required() and SESSION_SECRET == DEFAULT_SESSION_SECRET:
+        raise RuntimeError("AUTH_REQUIRED is enabled but SESSION_SECRET is not set. Set SESSION_SECRET to a long random value.")

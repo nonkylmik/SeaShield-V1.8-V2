@@ -31,6 +31,23 @@ class Incident(BaseModel):
     recommended_action: str = "Review related events and confirm containment."
 
 
+class IncidentCreate(BaseModel):
+    vessel_id: str
+    type: str = "MANUAL"
+    title: str
+    severity: Severity = Severity.MEDIUM
+    description: str = ""
+    assigned_operator: str | None = None
+
+
+class IncidentNoteCreate(BaseModel):
+    author: str = "Operator"
+    body: str
+
+
 class IncidentUpdate(BaseModel):
-    status: IncidentStatus
-    investigation_notes: str = ""
+    status: IncidentStatus | None = None
+    severity: Severity | None = None
+    assigned_operator: str | None = None
+    investigation_notes: str | None = None
+    actor: str | None = None

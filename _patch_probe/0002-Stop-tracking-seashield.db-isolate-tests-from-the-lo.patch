@@ -1,0 +1,289 @@
+From 112a89774897fcaf96eec7c3d58f09c659a47f0f Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 24 Sep 2026 09:33:18 +0300
+Subject: [PATCH 2/8] Stop tracking seashield.db; isolate tests from the local
+ database
+
+- backend/seashield.db is removed from git and *.db is ignored. The backend
+  creates the database and vessel rows on first start.
+- tests/conftest.py points DATABASE_URL at a temporary SQLite file before the
+  app is imported, so the test suite no longer reads or modifies the
+  developer's local database.
+- Single APP_VERSION ("1.9.0") for the FastAPI metadata and /health.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01F8gdxt3tGbrWATzufnb6wB
+---
+ .gitignore                |   4 ++++
+ backend/app/main.py       |   9 ++++++---
+ backend/seashield.db      | Bin 245760 -> 0 bytes
+ backend/tests/conftest.py |  11 +++++++++++
+ 4 files changed, 21 insertions(+), 3 deletions(-)
+ delete mode 100644 backend/seashield.db
+ create mode 100644 backend/tests/conftest.py
+
+diff --git a/.gitignore b/.gitignore
+index d24df8a..4522a26 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -30,3 +30,7 @@ dist-ssr
+ *.njsproj
+ *.sln
+ *.sw?
++
++# Local databases (created on first backend start)
++*.db
++*.db-journal
+diff --git a/backend/app/main.py b/backend/app/main.py
+index 847ef23..235af57 100644
+--- a/backend/app/main.py
++++ b/backend/app/main.py
+@@ -38,6 +38,9 @@ from schemas.security_events import SecurityEventCreate, SecurityEventResponse
+ from simulation.simulation_engine import SimulationEngine
+ from websocket_manager import ConnectionManager
+ 
++APP_VERSION = "1.9.0"
++
++
+ class ScenarioRequest(BaseModel):
+     scenario: str
+ 
+@@ -47,7 +50,7 @@ class InjectEventRequest(BaseModel):
+     event_type: str
+ 
+ 
+-app = FastAPI(title="SeaShield Security API", version="1.7.0", description="Simulation-only maritime security backend.")
++app = FastAPI(title="SeaShield Security API", version=APP_VERSION, description="Simulation-only maritime security backend.")
+ app.add_middleware(CORSMiddleware, allow_origin_regex=r"https?://(localhost|127\.0\.0\.1):\d+", allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+ app.state.websocket_manager = ConnectionManager()
+ engine = SimulationEngine(seed=7)
+@@ -146,9 +149,9 @@ def health() -> dict[str, str]:
+     try:
+         with SessionLocal() as db:
+             db.execute(text("SELECT 1"))
+-        return {"status": "ok", "database": "connected", "mode": "simulation", "version": "1.7.0"}
++        return {"status": "ok", "database": "connected", "mode": "simulation", "version": APP_VERSION}
+     except Exception:
+-        return {"status": "degraded", "database": "unavailable", "mode": "simulation", "version": "1.7.0"}
++        return {"status": "degraded", "database": "unavailable", "mode": "simulation", "version": APP_VERSION}
+ 
+ 
+ @app.post("/api/auth/login", response_model=LoginResponse)
+diff --git a/backend/seashield.db b/backend/seashield.db
+deleted file mode 100644
+index c93d20c8ab544da4ca28472ac8255c8ec58c7ffb..0000000000000000000000000000000000000000
+GIT binary patch
+literal 0
+HcmV?d00001
+
+literal 245760
+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
+
+diff --git a/backend/tests/conftest.py b/backend/tests/conftest.py
+new file mode 100644
+index 0000000..8d4016b
+--- /dev/null
++++ b/backend/tests/conftest.py
+@@ -0,0 +1,11 @@
++"""Point the whole test session at a throw-away SQLite database.
++
++Must run before ``app.main`` / ``db.database`` are imported, so the repository's local
++``seashield.db`` is never read or modified by tests.
++"""
++import os
++import tempfile
++from pathlib import Path
++
++_TEST_DB_DIR = tempfile.mkdtemp(prefix="seashield-tests-")
++os.environ["DATABASE_URL"] = f"sqlite:///{Path(_TEST_DB_DIR) / 'test.db'}"
+-- 
+2.43.0
+

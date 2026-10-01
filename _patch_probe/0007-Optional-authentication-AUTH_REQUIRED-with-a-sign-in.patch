@@ -1,0 +1,512 @@
+From ed986c67ed467a3477679eaadcc28aa23813757a Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 24 Sep 2026 09:45:01 +0300
+Subject: [PATCH 7/8] Optional authentication (AUTH_REQUIRED) with a sign-in
+ screen
+
+Login endpoints existed but no endpoint required a session, e.g.
+DELETE /api/security-events/{id} worked anonymously.
+
+Backend
+- AUTH_REQUIRED=true makes every HTTP endpoint except /health, /api/auth/*
+  and the API docs return 401 without a valid session cookie; the WebSocket
+  is closed with code 1008. Default stays off so the demo/Lovable preview is
+  unaffected.
+- The auth middleware sits inside CORS, so 401 responses carry CORS headers
+  and the browser can react to them.
+- With AUTH_REQUIRED=true the backend refuses to start while SESSION_SECRET
+  is still the default value.
+- GET /api/auth/config -> {"auth_required": bool}.
+
+Frontend
+- On startup the console asks /api/auth/config; if a login is required and
+  there is no session it shows a sign-in screen (also after any 401).
+- After sign-in the operator name/role come from the session user, the
+  WebSocket is opened and data refreshed; a sign-out button is shown.
+- Operator initials are derived from the name instead of hard-coded "RV".
+
+README documents the environment variables. Tests: tests/test_auth_required.py.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01F8gdxt3tGbrWATzufnb6wB
+---
+ README.md                                | 12 ++++
+ backend/app/main.py                      | 29 +++++++++-
+ backend/auth.py                          | 17 +++++-
+ backend/tests/test_auth_required.py      | 53 ++++++++++++++++++
+ src/components/seashield/AppShell.tsx    | 25 ++++++++-
+ src/components/seashield/LoginScreen.tsx | 70 ++++++++++++++++++++++++
+ src/lib/seashield/backend.ts             | 43 ++++++++++++++-
+ src/lib/seashield/data.ts                |  1 +
+ src/lib/seashield/store.ts               | 10 +++-
+ src/lib/seashield/types.ts               |  2 +
+ 10 files changed, 254 insertions(+), 8 deletions(-)
+ create mode 100644 backend/tests/test_auth_required.py
+ create mode 100644 src/components/seashield/LoginScreen.tsx
+
+diff --git a/README.md b/README.md
+index 93776af..56437af 100644
+--- a/README.md
++++ b/README.md
+@@ -8,6 +8,18 @@ This merged copy uses the V1.8 FastAPI, WebSocket, persistence, simulation, and
+ 2. At this project root: `npm install; npm run dev`
+ 3. Open the V2 console. It connects to `http://localhost:8000`; set `VITE_API_URL` for another backend address.
+ 
++### Authentication (optional)
++
++By default the API is open so the demo console works without a login. To require a session for every API call and the WebSocket, start the backend with:
++
++```
++AUTH_REQUIRED=true SESSION_SECRET=<long random value> python -m uvicorn app.main:app --port 8000
++```
++
++The console then shows a sign-in screen (demo user from `DEMO_USER_EMAIL` / `DEMO_USER_PASSWORD`, default `operator@seashield.local` / `seashield-demo`). The backend refuses to start with `AUTH_REQUIRED=true` and the default secret.
++
++The local database (`backend/seashield.db`) is not tracked in git; it is created on first start.
++
+ V2 hydrates vessels, cameras, events, incidents, simulation actions, and WebSocket updates from V1.8. V2-only device telemetry remains explicitly simulated until V1.8 supplies equivalent API endpoints.
+ 
+ ---
+diff --git a/backend/app/main.py b/backend/app/main.py
+index efc7da0..8f6468e 100644
+--- a/backend/app/main.py
++++ b/backend/app/main.py
+@@ -3,11 +3,13 @@ from uuid import uuid4
+ 
+ from fastapi import Cookie, Depends, FastAPI, HTTPException, Query, Response, WebSocket, WebSocketDisconnect
+ from fastapi.middleware.cors import CORSMiddleware
++from fastapi.responses import JSONResponse
++from starlette.middleware.base import BaseHTTPMiddleware
+ from pydantic import BaseModel
+ from sqlalchemy import text
+ from sqlalchemy.orm import Session
+ 
+-from auth import SESSION_COOKIE, SESSION_TTL_SECONDS, authenticate, create_session, read_session
++from auth import SESSION_COOKIE, SESSION_TTL_SECONDS, auth_required, authenticate, create_session, read_session, validate_auth_configuration
+ from db.database import Base, SessionLocal, engine as db_engine, get_db
+ from db.events import create_event, delete_event, from_record, get_event, list_events, load_events
+ from db.models import IncidentRecord, VesselRecord
+@@ -65,6 +67,22 @@ class InjectEventRequest(BaseModel):
+ 
+ 
+ app = FastAPI(title="SeaShield Security API", version=APP_VERSION, description="Simulation-only maritime security backend.")
++# Paths reachable without a session even when AUTH_REQUIRED=true.
++PUBLIC_PATHS = {"/health", "/api/auth/login", "/api/auth/logout", "/api/auth/me", "/api/auth/config", "/docs", "/redoc", "/openapi.json"}
++
++
++class RequireSessionMiddleware(BaseHTTPMiddleware):
++    """Rejects unauthenticated HTTP requests with 401 when AUTH_REQUIRED is enabled."""
++
++    async def dispatch(self, request, call_next):
++        if auth_required() and request.method != "OPTIONS" and request.url.path not in PUBLIC_PATHS:
++            if read_session(request.cookies.get(SESSION_COOKIE)) is None:
++                return JSONResponse({"detail": "Not authenticated"}, status_code=401)
++        return await call_next(request)
++
++
++# Added before CORS so CORS is the outer layer and 401 responses still carry CORS headers.
++app.add_middleware(RequireSessionMiddleware)
+ app.add_middleware(CORSMiddleware, allow_origin_regex=r"https?://(localhost|127\.0\.0\.1):\d+", allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+ app.state.websocket_manager = ConnectionManager()
+ engine = SimulationEngine(seed=7)
+@@ -168,6 +186,7 @@ def sync_engine_from_db(db: Session) -> None:
+ 
+ @app.on_event("startup")
+ def initialize_database() -> None:
++    validate_auth_configuration()
+     Base.metadata.create_all(bind=db_engine)
+     with SessionLocal() as db:
+         sync_engine_from_db(db)
+@@ -205,6 +224,11 @@ def current_user(session: str | None = Cookie(default=None, alias=SESSION_COOKIE
+     return UserResponse(email=user.email, name=user.name, role=user.role)
+ 
+ 
++@app.get("/api/auth/config")
++def auth_config():
++    return {"auth_required": auth_required()}
++
++
+ @app.get("/vessels")
+ @app.get("/api/v1/vessels")
+ def get_vessels(db: Session = Depends(get_db)):
+@@ -680,6 +704,9 @@ async def update_safety_finding_endpoint(finding_id: str, payload: SafetyFinding
+ @app.websocket("/ws/security")
+ async def websocket_security(websocket: WebSocket):
+     manager = app.state.websocket_manager
++    if auth_required() and read_session(websocket.cookies.get(SESSION_COOKIE)) is None:
++        await websocket.close(code=1008)  # policy violation: not authenticated
++        return
+     await manager.connect(websocket)
+     try:
+         while True:
+diff --git a/backend/auth.py b/backend/auth.py
+index 5b18ce7..0ed0794 100644
+--- a/backend/auth.py
++++ b/backend/auth.py
+@@ -8,7 +8,8 @@ from dataclasses import dataclass
+ 
+ SESSION_COOKIE = "seashield_session"
+ SESSION_TTL_SECONDS = 8 * 60 * 60
+-SESSION_SECRET = os.getenv("SESSION_SECRET", "change-me-in-development")
++DEFAULT_SESSION_SECRET = "change-me-in-development"
++SESSION_SECRET = os.getenv("SESSION_SECRET", DEFAULT_SESSION_SECRET)
+ DEMO_EMAIL = os.getenv("DEMO_USER_EMAIL", "operator@seashield.local")
+ DEMO_PASSWORD = os.getenv("DEMO_USER_PASSWORD", "seashield-demo")
+ 
+@@ -58,3 +59,17 @@ def read_session(token: str | None) -> User | None:
+     if not hmac.compare_digest(signature, expected) or int(expires) < int(time.time()):
+         return None
+     return DEMO_USER if hmac.compare_digest(email.lower(), DEMO_USER.email.lower()) else None
++
++
++def auth_required() -> bool:
++    """Authentication is opt-in so the demo console keeps working without a login.
++
++    Set AUTH_REQUIRED=true to require a valid session for every API call and the
++    WebSocket. SESSION_SECRET must then be set to a non-default value.
++    """
++    return os.getenv("AUTH_REQUIRED", "false").strip().lower() in {"1", "true", "yes", "on"}
++
++
++def validate_auth_configuration() -> None:
++    if auth_required() and SESSION_SECRET == DEFAULT_SESSION_SECRET:
++        raise RuntimeError("AUTH_REQUIRED is enabled but SESSION_SECRET is not set. Set SESSION_SECRET to a long random value.")
+diff --git a/backend/tests/test_auth_required.py b/backend/tests/test_auth_required.py
+new file mode 100644
+index 0000000..43607d9
+--- /dev/null
++++ b/backend/tests/test_auth_required.py
+@@ -0,0 +1,53 @@
++"""AUTH_REQUIRED=true protects the API and WebSocket; default stays open for the demo."""
++
++import pytest
++from fastapi.testclient import TestClient
++from starlette.websockets import WebSocketDisconnect
++
++import auth
++from app.main import app
++
++LOGIN = {"email": "operator@seashield.local", "password": "seashield-demo"}
++
++
++@pytest.fixture()
++def required(monkeypatch):
++    monkeypatch.setenv("AUTH_REQUIRED", "true")
++    monkeypatch.setattr(auth, "SESSION_SECRET", "test-secret-not-default")
++    # the password digest is salted with the secret, so recompute it for the test secret
++    monkeypatch.setattr(auth, "PASSWORD_DIGEST", auth._digest(LOGIN["password"]))
++
++
++def test_api_is_open_by_default(monkeypatch):
++    monkeypatch.delenv("AUTH_REQUIRED", raising=False)
++    with TestClient(app) as client:
++        assert client.get("/api/v1/vessels").status_code == 200
++        assert client.get("/api/auth/config").json() == {"auth_required": False}
++
++
++def test_api_requires_session_when_enabled(required):
++    with TestClient(app) as client:
++        assert client.get("/api/auth/config").json() == {"auth_required": True}
++        assert client.get("/health").status_code == 200
++        assert client.get("/api/v1/vessels").status_code == 401
++        assert client.delete("/api/security-events/anything").status_code == 401
++        # CORS headers are present on the 401 so the browser can read it
++        denied = client.get("/api/v1/incidents", headers={"Origin": "http://localhost:5173"})
++        assert denied.status_code == 401 and denied.headers.get("access-control-allow-origin") == "http://localhost:5173"
++        with pytest.raises(WebSocketDisconnect):
++            with client.websocket_connect("/ws/security") as websocket:
++                websocket.receive_text()
++        assert client.post("/api/auth/login", json=LOGIN).status_code == 200
++        assert client.get("/api/v1/vessels").status_code == 200
++        with client.websocket_connect("/ws/security"):
++            pass
++        client.post("/api/auth/logout")
++        assert client.get("/api/v1/vessels").status_code == 401
++
++
++def test_default_secret_is_refused_when_auth_is_required(monkeypatch):
++    monkeypatch.setenv("AUTH_REQUIRED", "true")
++    monkeypatch.setattr(auth, "SESSION_SECRET", auth.DEFAULT_SESSION_SECRET)
++    with pytest.raises(RuntimeError, match="SESSION_SECRET"):
++        with TestClient(app):
++            pass
+diff --git a/src/components/seashield/AppShell.tsx b/src/components/seashield/AppShell.tsx
+index 123d76c..bc38d43 100644
+--- a/src/components/seashield/AppShell.tsx
++++ b/src/components/seashield/AppShell.tsx
+@@ -9,6 +9,7 @@ import {
+   Gauge,
+   KeyRound,
+   LayoutDashboard,
++  LogOut,
+   Radar,
+   Search,
+   Settings,
+@@ -22,7 +23,8 @@ import { useSeaShield, useTelemetryClock } from "@/lib/seashield/useSeaShield";
+ import { securityService, vesselService } from "@/lib/seashield/services";
+ import { utcTime, stateColor, severityText } from "@/lib/seashield/format";
+ import { StatusDot } from "./primitives";
+-import { connectSeaShieldBackend } from "@/lib/seashield/backend";
++import { connectSeaShieldBackend, logout } from "@/lib/seashield/backend";
++import { LoginScreen } from "./LoginScreen";
+ 
+ const NAV = [
+   { to: "/", label: "Dashboard", icon: LayoutDashboard, key: "F1" },
+@@ -41,6 +43,8 @@ export function AppShell({ children }: { children: ReactNode }) {
+   useTelemetryClock();
+   useEffect(() => connectSeaShieldBackend(), []);
+   const pathname = useRouterState({ select: (s) => s.location.pathname });
++  const auth = useSeaShield((s) => s.auth);
++  if (auth.required && !auth.user) return <LoginScreen />;
+ 
+   return (
+     <div className="flex h-screen w-screen flex-col overflow-hidden bg-background">
+@@ -87,6 +91,13 @@ function TopBar() {
+   const selected = useSeaShield((s) => s.selectedVesselId);
+   const notifications = useSeaShield((s) => s.notifications);
+   const operator = useSeaShield((s) => s.operator);
++  const signedIn = useSeaShield((s) => Boolean(s.auth.user));
++  const initials = operator.name
++    .split(/[\s.]+/)
++    .filter(Boolean)
++    .map((part) => part[0]!.toUpperCase())
++    .slice(0, 2)
++    .join("");
+   const summary = useMemo(() => securityService.fleetSummary("all"), [vessels]);
+   const unread = notifications.filter((n) => !n.read).length;
+   const [openNotif, setOpenNotif] = useState(false);
+@@ -166,12 +177,22 @@ function TopBar() {
+ 
+         <div className="flex items-center gap-2 border-l border-border pl-3">
+           <div className="flex size-7 items-center justify-center rounded-sm bg-secondary font-mono text-[11px]">
+-            RV
++            {initials}
+           </div>
+           <div className="hidden leading-tight xl:block">
+             <div className="text-xs font-medium">{operator.name}</div>
+             <div className="label-mono text-[9px] normal-case">{operator.role}</div>
+           </div>
++          {signedIn ? (
++            <button
++              aria-label="Sign out"
++              title="Sign out"
++              onClick={() => void logout()}
++              className="flex size-7 items-center justify-center border border-border hover:bg-accent"
++            >
++              <LogOut className="size-3.5" />
++            </button>
++          ) : null}
+         </div>
+       </div>
+     </header>
+diff --git a/src/components/seashield/LoginScreen.tsx b/src/components/seashield/LoginScreen.tsx
+new file mode 100644
+index 0000000..df7b97e
+--- /dev/null
++++ b/src/components/seashield/LoginScreen.tsx
+@@ -0,0 +1,70 @@
++import { useState, type FormEvent } from "react";
++import { Radar } from "lucide-react";
++import { login } from "@/lib/seashield/backend";
++
++/** Shown only when the backend runs with AUTH_REQUIRED=true and there is no valid session. */
++export function LoginScreen() {
++  const [email, setEmail] = useState("");
++  const [password, setPassword] = useState("");
++  const [error, setError] = useState<string | null>(null);
++  const [busy, setBusy] = useState(false);
++
++  const submit = async (e: FormEvent) => {
++    e.preventDefault();
++    setBusy(true);
++    setError(null);
++    try {
++      await login(email.trim(), password);
++    } catch {
++      setError("Invalid email or password.");
++    } finally {
++      setBusy(false);
++    }
++  };
++
++  return (
++    <div className="flex h-screen w-screen items-center justify-center bg-background">
++      <form onSubmit={submit} className="w-80 space-y-3 border border-border bg-panel p-5">
++        <div className="flex items-center gap-2 pb-2">
++          <div className="flex size-7 items-center justify-center rounded-sm bg-signal/15 ring-1 ring-signal/40">
++            <Radar className="size-4 text-signal" />
++          </div>
++          <div className="leading-none">
++            <div className="text-sm font-semibold tracking-[0.18em]">SEASHIELD</div>
++            <div className="label-mono text-[9px]">Operator sign-in</div>
++          </div>
++        </div>
++        <label className="block">
++          <span className="label-mono">Email</span>
++          <input
++            type="email"
++            autoComplete="username"
++            value={email}
++            onChange={(e) => setEmail(e.target.value)}
++            required
++            className="h-8 w-full rounded-sm border border-input bg-background px-2 text-xs outline-none focus:border-ring"
++          />
++        </label>
++        <label className="block">
++          <span className="label-mono">Password</span>
++          <input
++            type="password"
++            autoComplete="current-password"
++            value={password}
++            onChange={(e) => setPassword(e.target.value)}
++            required
++            className="h-8 w-full rounded-sm border border-input bg-background px-2 text-xs outline-none focus:border-ring"
++          />
++        </label>
++        {error ? <p className="text-xs text-critical">{error}</p> : null}
++        <button
++          type="submit"
++          disabled={busy}
++          className="label-mono w-full border border-signal/60 bg-signal/10 px-2 py-2 hover:bg-signal/20 disabled:opacity-50"
++        >
++          {busy ? "Signing in…" : "Sign in"}
++        </button>
++      </form>
++    </div>
++  );
++}
+diff --git a/src/lib/seashield/backend.ts b/src/lib/seashield/backend.ts
+index fd3f380..d590e8e 100644
+--- a/src/lib/seashield/backend.ts
++++ b/src/lib/seashield/backend.ts
+@@ -1,4 +1,4 @@
+-import { hydrateFromBackend } from "./store";
++import { getState, hydrateFromBackend, setAuth } from "./store";
+ import type { Camera, Incident, SecurityEvent, Severity, Vessel } from "./types";
+ 
+ const API_URL = (import.meta.env["VITE_API_URL"] ?? "http://localhost:8000").replace(/\/$/, "");
+@@ -40,6 +40,10 @@ function incidentStatus(value: string): Incident["status"] {
+ }
+ async function request<T>(path: string, options?: RequestInit): Promise<T> {
+   const response = await fetch(`${API_URL}${path}`, { ...options, credentials: "include", headers: { "Content-Type": "application/json", ...options?.headers } });
++  if (response.status === 401 && !path.startsWith("/api/auth/")) {
++    // backend runs with AUTH_REQUIRED=true and our session is missing/expired
++    setAuth({ required: true });
++  }
+   if (!response.ok) throw new Error(`SeaShield API request failed (${response.status})`);
+   return response.status === 204 ? undefined as T : response.json() as Promise<T>;
+ }
+@@ -140,6 +144,8 @@ function scheduleRefresh(delay = REFRESH_DEBOUNCE_MS) {
+ 
+ function openSocket() {
+   if (socket || consumers === 0) return;
++  const { auth } = getState();
++  if (auth.required && !auth.user) return; // opened by login()
+   const ws = new WebSocket(WS_URL);
+   socket = ws;
+   ws.onopen = () => {
+@@ -152,6 +158,8 @@ function openSocket() {
+   ws.onclose = () => {
+     if (socket === ws) socket = undefined;
+     if (consumers === 0) return;
++    const { auth } = getState();
++    if (auth.required && !auth.user) return; // wait for login instead of retrying
+     hydrateFromBackend({ health: "degraded" });
+     const delay = Math.min(MAX_RECONNECT_DELAY_MS, 1000 * 2 ** reconnectAttempt);
+     reconnectAttempt += 1;
+@@ -159,10 +167,39 @@ function openSocket() {
+   };
+ }
+ 
++type ApiUser = { email: string; name: string; role: string };
++
++/** Ask the backend whether a login is needed and whether we already have a session. */
++async function checkAuth() {
++  const config = await request<{ auth_required: boolean }>("/api/auth/config").catch(() => ({ auth_required: false }));
++  if (!config.auth_required) return setAuth({ required: false });
++  const user = await request<ApiUser>("/api/auth/me").catch(() => undefined);
++  setAuth(user ? { required: true, user } : { required: true });
++}
++
++export async function login(email: string, password: string) {
++  const response = await request<{ user: ApiUser }>("/api/auth/login", { method: "POST", body: JSON.stringify({ email, password }) });
++  setAuth({ required: true, user: response.user });
++  window.clearTimeout(reconnectTimer);
++  reconnectAttempt = 0;
++  openSocket();
++  scheduleRefresh(0);
++}
++
++export async function logout() {
++  await request("/api/auth/logout", { method: "POST" }).catch(() => undefined);
++  const ws = socket;
++  socket = undefined;
++  ws?.close();
++  await checkAuth();
++}
++
+ export function connectSeaShieldBackend() {
+   consumers += 1;
+-  scheduleRefresh(0);
+-  openSocket();
++  void checkAuth().finally(() => {
++    scheduleRefresh(0);
++    openSocket();
++  });
+   return () => {
+     consumers = Math.max(0, consumers - 1);
+     if (consumers > 0) return;
+diff --git a/src/lib/seashield/data.ts b/src/lib/seashield/data.ts
+index 20d6eda..e7140d5 100644
+--- a/src/lib/seashield/data.ts
++++ b/src/lib/seashield/data.ts
+@@ -386,6 +386,7 @@ export function buildSeedState(): SeaShieldState {
+     selectedVesselId: "all",
+     operator: { name: "R. Vance", role: "Senior Security Operator", shift: "12:00–00:00Z" },
+     connection: { edge: "online", backend: "online", mode: "SIMULATION V1" },
++    auth: { required: false },
+   };
+ }
+ 
+diff --git a/src/lib/seashield/store.ts b/src/lib/seashield/store.ts
+index 140862b..5348f6e 100644
+--- a/src/lib/seashield/store.ts
++++ b/src/lib/seashield/store.ts
+@@ -95,6 +95,14 @@ export function hydrateFromBackend(payload: BackendPayload) {
+   emit();
+ }
+ 
++export function setAuth(auth: SeaShieldState["auth"]) {
++  state.auth = auth;
++  if (auth.user) {
++    state.operator = { ...state.operator, name: auth.user.name, role: auth.user.role };
++  }
++  emit();
++}
++
+ export function selectVessel(id: string | "all") {
+   state.selectedVesselId = id;
+   emit();
+@@ -588,7 +596,7 @@ export function triggerScenario(scenario: ScenarioId, vesselId: string) {
+ }
+ 
+ export function resetSimulation() {
+-  state = buildSeedState();
++  state = { ...buildSeedState(), auth: state.auth };
+   clockOffset = 0;
+   emit();
+ }
+diff --git a/src/lib/seashield/types.ts b/src/lib/seashield/types.ts
+index c4309fc..f909108 100644
+--- a/src/lib/seashield/types.ts
++++ b/src/lib/seashield/types.ts
+@@ -158,4 +158,6 @@ export interface SeaShieldState {
+   selectedVesselId: string | "all";
+   operator: { name: string; role: string; shift: string };
+   connection: { edge: OnlineState; backend: OnlineState; mode: string };
++  /** required: backend runs with AUTH_REQUIRED=true; user: the signed-in operator. */
++  auth: { required: boolean; user?: { email: string; name: string; role: string } };
+ }
+-- 
+2.43.0
+

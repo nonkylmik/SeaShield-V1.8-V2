@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from db.models import IncidentEventLink, IncidentRecord
+from db.models import IncidentActivityRecord, IncidentEventLink, IncidentNoteRecord, IncidentRecord
 
 
 def create_incident_record(
@@ -69,3 +69,77 @@ def list_incident_records(db: Session, vessel_id: str | None = None) -> list[Inc
 def get_related_event_ids(db: Session, incident_id: str) -> list[str]:
     rows = db.scalars(select(IncidentEventLink.event_id).where(IncidentEventLink.incident_id == incident_id)).all()
     return list(rows)
+
+
+def update_incident_record(
+    db: Session,
+    incident_id: str,
+    *,
+    status: str | None = None,
+    investigation_notes: str | None = None,
+    assigned_operator: str | None = None,
+    severity: str | None = None,
+) -> IncidentRecord | None:
+    record = get_incident_record(db, incident_id)
+    if record is None:
+        return None
+    if status is not None:
+        record.status = status
+    if investigation_notes is not None:
+        record.investigation_notes = investigation_notes
+    if assigned_operator is not None:
+        record.assigned_operator = assigned_operator
+    if severity is not None:
+        record.severity = severity
+    record.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(record)
+    return record
+
+
+def close_open_incident_records(db: Session, *, status: str, note: str) -> int:
+    records = list(db.scalars(select(IncidentRecord).where(IncidentRecord.status != "RESOLVED")).all())
+    for record in records:
+        record.status = status
+        record.investigation_notes = note
+        record.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    return len(records)
+
+
+def add_incident_note(db: Session, incident_id: str, *, author: str, body: str) -> IncidentNoteRecord:
+    note = IncidentNoteRecord(note_id=f"NOTE-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}-{abs(hash(incident_id + body)) % 100000:05d}", incident_id=incident_id, author=author, body=body)
+    db.add(note)
+    db.commit()
+    db.refresh(note)
+    return note
+
+
+def list_incident_notes(db: Session, incident_id: str) -> list[IncidentNoteRecord]:
+    return list(db.scalars(select(IncidentNoteRecord).where(IncidentNoteRecord.incident_id == incident_id).order_by(IncidentNoteRecord.created_at.asc())).all())
+
+
+def add_incident_activity(db: Session, incident_id: str, text: str, *, actor: str | None = None) -> IncidentActivityRecord:
+    activity = IncidentActivityRecord(incident_id=incident_id, text=text, actor=actor)
+    db.add(activity)
+    db.commit()
+    db.refresh(activity)
+    return activity
+
+
+def list_incident_activity(db: Session, incident_id: str) -> list[IncidentActivityRecord]:
+    return list(db.scalars(select(IncidentActivityRecord).where(IncidentActivityRecord.incident_id == incident_id).order_by(IncidentActivityRecord.created_at.asc())).all())
+
+
+def update_incident_fields(db: Session, incident_id: str, **fields: object) -> IncidentRecord | None:
+    record = get_incident_record(db, incident_id)
+    if record is None:
+        return None
+    for key, value in fields.items():
+        if value is None:
+            continue
+        setattr(record, key, value)
+    record.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(record)
+    return record

@@ -1,0 +1,1578 @@
+From 62dd52519bddd03662c9edd3c2d84e3fcada3981 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 24 Sep 2026 09:45:31 +0300
+Subject: [PATCH 8/8] style: apply Prettier to src/ (formatting only)
+
+Output of `npx prettier --write src`. No code changes; `npx eslint .` now
+reports 0 errors (was 135 prettier errors). The 13 remaining warnings are
+pre-existing (react-refresh/only-export-components and redundant useMemo
+dependencies).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01F8gdxt3tGbrWATzufnb6wB
+---
+ src/components/seashield/AppShell.tsx         |  26 ++-
+ src/components/seashield/CameraTile.tsx       |  12 +-
+ src/components/seashield/EventStream.tsx      |  13 +-
+ .../seashield/SimulationConsole.tsx           |   8 +-
+ src/components/seashield/primitives.tsx       |  24 +-
+ src/lib/seashield/backend.ts                  | 220 +++++++++++++++---
+ src/lib/seashield/data.ts                     |  14 +-
+ src/lib/seashield/services.ts                 |  21 +-
+ src/lib/seashield/store.ts                    |  62 ++++-
+ src/lib/seashield/types.ts                    |  24 +-
+ src/routes/README.md                          |  20 +-
+ src/routes/access-control.tsx                 |  40 +++-
+ src/routes/cameras.tsx                        |   6 +-
+ src/routes/cybersecurity.tsx                  |  29 ++-
+ src/routes/fleet.tsx                          |  22 +-
+ src/routes/incidents.tsx                      |  59 +++--
+ src/routes/index.tsx                          |  22 +-
+ src/routes/reports.tsx                        |  26 ++-
+ src/routes/sensors.tsx                        |  26 ++-
+ src/routes/settings.tsx                       |  15 +-
+ src/routes/vessels.$vesselId.tsx              |  74 ++++--
+ src/routes/vessels.index.tsx                  |  22 +-
+ src/styles.css                                |   3 +-
+ 23 files changed, 597 insertions(+), 191 deletions(-)
+
+diff --git a/src/components/seashield/AppShell.tsx b/src/components/seashield/AppShell.tsx
+index bc38d43..9ffa01a 100644
+--- a/src/components/seashield/AppShell.tsx
++++ b/src/components/seashield/AppShell.tsx
+@@ -53,8 +53,7 @@ export function AppShell({ children }: { children: ReactNode }) {
+         <nav className="flex w-[13.5rem] shrink-0 flex-col border-r border-sidebar-border bg-sidebar">
+           <div className="flex-1 overflow-auto py-2">
+             {NAV.map((item) => {
+-              const active =
+-                item.to === "/" ? pathname === "/" : pathname.startsWith(item.to);
++              const active = item.to === "/" ? pathname === "/" : pathname.startsWith(item.to);
+               return (
+                 <Link
+                   key={item.to}
+@@ -67,7 +66,10 @@ export function AppShell({ children }: { children: ReactNode }) {
+                   )}
+                 >
+                   <item.icon
+-                    className={cn("size-4 shrink-0", active ? "text-sidebar-primary" : "text-muted-foreground")}
++                    className={cn(
++                      "size-4 shrink-0",
++                      active ? "text-sidebar-primary" : "text-muted-foreground",
++                    )}
+                   />
+                   <span className="flex-1 truncate">{item.label}</span>
+                   <span className="tabular text-[10px] text-muted-foreground opacity-0 group-hover:opacity-100">
+@@ -165,7 +167,9 @@ function TopBar() {
+                       <span className={cn("text-xs font-semibold", severityText[n.severity])}>
+                         {n.title}
+                       </span>
+-                      <span className="tabular text-[10px] text-muted-foreground">{utcTime(n.ts)}</span>
++                      <span className="tabular text-[10px] text-muted-foreground">
++                        {utcTime(n.ts)}
++                      </span>
+                     </div>
+                     <p className="mt-0.5 text-xs text-muted-foreground">{n.body}</p>
+                   </li>
+@@ -209,10 +213,20 @@ function GlobalSearch() {
+     return [
+       ...vessels
+         .filter((v) => (v.name + v.imo).toLowerCase().includes(t))
+-        .map((v) => ({ id: v.id, kind: "Vessel", label: `${v.name} · ${v.imo}`, to: `/vessels/${v.id}` })),
++        .map((v) => ({
++          id: v.id,
++          kind: "Vessel",
++          label: `${v.name} · ${v.imo}`,
++          to: `/vessels/${v.id}`,
++        })),
+       ...incidents
+         .filter((i) => (i.ref + i.title).toLowerCase().includes(t))
+-        .map((i) => ({ id: i.id, kind: "Incident", label: `${i.ref} · ${i.title}`, to: `/incidents` })),
++        .map((i) => ({
++          id: i.id,
++          kind: "Incident",
++          label: `${i.ref} · ${i.title}`,
++          to: `/incidents`,
++        })),
+     ].slice(0, 8);
+   }, [q, vessels, incidents]);
+ 
+diff --git a/src/components/seashield/CameraTile.tsx b/src/components/seashield/CameraTile.tsx
+index 38e27d6..eda27e4 100644
+--- a/src/components/seashield/CameraTile.tsx
++++ b/src/components/seashield/CameraTile.tsx
+@@ -4,7 +4,13 @@ import { onlineText, utcTime } from "@/lib/seashield/format";
+ import { cn } from "@/lib/utils";
+ 
+ /** Simulated feed placeholder — no real video stream is used in Prototype V1. */
+-export function CameraTile({ camera, vesselName }: { camera: Camera; vesselName?: string | undefined }) {
++export function CameraTile({
++  camera,
++  vesselName,
++}: {
++  camera: Camera;
++  vesselName?: string | undefined;
++}) {
+   const offline = camera.state === "offline";
+   const degraded = camera.state === "degraded";
+ 
+@@ -34,7 +40,9 @@ export function CameraTile({ camera, vesselName }: { camera: Camera; vesselName?
+           )}
+         </div>
+         <div className="absolute top-1.5 left-1.5 flex items-center gap-1.5">
+-          <span className="label-mono bg-background/80 px-1.5 py-0.5 text-foreground">{camera.label}</span>
++          <span className="label-mono bg-background/80 px-1.5 py-0.5 text-foreground">
++            {camera.label}
++          </span>
+         </div>
+         <div className="absolute top-1.5 right-1.5 flex items-center gap-1">
+           {camera.recording ? (
+diff --git a/src/components/seashield/EventStream.tsx b/src/components/seashield/EventStream.tsx
+index 9f7a28e..990352a 100644
+--- a/src/components/seashield/EventStream.tsx
++++ b/src/components/seashield/EventStream.tsx
+@@ -8,7 +8,10 @@ export function EventStream({ limit = 60 }: { limit?: number }) {
+   const scope = useSeaShield((s) => s.selectedVesselId);
+   const events = useSeaShield((s) => s.events);
+   const vessels = useSeaShield((s) => s.vessels);
+-  const rows = (scope === "all" ? events : events.filter((e) => e.vesselId === scope)).slice(0, limit);
++  const rows = (scope === "all" ? events : events.filter((e) => e.vesselId === scope)).slice(
++    0,
++    limit,
++  );
+   const name = (id: string) => vessels.find((v) => v.id === id)?.name ?? id;
+ 
+   return (
+@@ -25,12 +28,16 @@ export function EventStream({ limit = 60 }: { limit?: number }) {
+       <tbody>
+         {rows.map((e) => (
+           <tr key={e.id} className="border-b border-border/50 hover:bg-accent/40">
+-            <td className="tabular px-3 py-1.5 whitespace-nowrap text-muted-foreground">{utcTime(e.ts)}</td>
++            <td className="tabular px-3 py-1.5 whitespace-nowrap text-muted-foreground">
++              {utcTime(e.ts)}
++            </td>
+             <td className="px-3 py-1.5">
+               <SeverityTag severity={e.severity} />
+             </td>
+             <td className="label-mono px-3 py-1.5">{e.category}</td>
+-            <td className="px-3 py-1.5 whitespace-nowrap text-muted-foreground">{name(e.vesselId)}</td>
++            <td className="px-3 py-1.5 whitespace-nowrap text-muted-foreground">
++              {name(e.vesselId)}
++            </td>
+             <td className="px-3 py-1.5">
+               <span className={cn("font-medium", severityText[e.severity])}>{e.title}</span>
+               <span className="ml-2 text-muted-foreground">{e.detail}</span>
+diff --git a/src/components/seashield/SimulationConsole.tsx b/src/components/seashield/SimulationConsole.tsx
+index 0c67b2e..d9ed3fb 100644
+--- a/src/components/seashield/SimulationConsole.tsx
++++ b/src/components/seashield/SimulationConsole.tsx
+@@ -78,14 +78,16 @@ export function SimulationConsole({ className }: { className?: string }) {
+               {log.length === 0 ? (
+                 <tr>
+                   <td className="px-3 py-3 text-muted-foreground">
+-                    No simulated events triggered yet. Fire a scenario to see events, correlation and
+-                    incidents update across the console.
++                    No simulated events triggered yet. Fire a scenario to see events, correlation
++                    and incidents update across the console.
+                   </td>
+                 </tr>
+               ) : (
+                 log.map((l) => (
+                   <tr key={l.id} className="border-b border-border/60">
+-                    <td className="tabular w-16 px-3 py-1.5 text-muted-foreground">{utcTime(l.ts)}</td>
++                    <td className="tabular w-16 px-3 py-1.5 text-muted-foreground">
++                      {utcTime(l.ts)}
++                    </td>
+                     <td className="px-2 py-1.5 font-medium">{l.scenario}</td>
+                     <td className="px-3 py-1.5 text-right text-muted-foreground">{l.outcome}</td>
+                   </tr>
+diff --git a/src/components/seashield/primitives.tsx b/src/components/seashield/primitives.tsx
+index b01b9f3..ff64b1a 100644
+--- a/src/components/seashield/primitives.tsx
++++ b/src/components/seashield/primitives.tsx
+@@ -36,7 +36,9 @@ export function Panel({
+           {actions}
+         </header>
+       ) : null}
+-      <div className={cn("min-h-0 flex-1", scroll && "overflow-auto", bodyClassName)}>{children}</div>
++      <div className={cn("min-h-0 flex-1", scroll && "overflow-auto", bodyClassName)}>
++        {children}
++      </div>
+     </section>
+   );
+ }
+@@ -62,9 +64,7 @@ export function StatusDot({
+   pulse?: boolean | undefined;
+ }) {
+   const cls =
+-    state in stateDot
+-      ? stateDot[state as SecurityState]
+-      : onlineDot[state as OnlineState];
++    state in stateDot ? stateDot[state as SecurityState] : onlineDot[state as OnlineState];
+   return (
+     <span className="relative inline-flex size-2 items-center justify-center">
+       <span className={cn("size-2 rounded-full", cls)} />
+@@ -116,10 +116,19 @@ export function Metric({
+ 
+ export function ScoreBar({ score }: { score: number }) {
+   const tone =
+-    score >= 86 ? "bg-secure" : score >= 72 ? "bg-caution" : score >= 55 ? "bg-warning" : "bg-critical";
++    score >= 86
++      ? "bg-secure"
++      : score >= 72
++        ? "bg-caution"
++        : score >= 55
++          ? "bg-warning"
++          : "bg-critical";
+   return (
+     <div className="h-1.5 w-full overflow-hidden rounded-full bg-secondary">
+-      <div className={cn("h-full transition-all duration-500", tone)} style={{ width: `${score}%` }} />
++      <div
++        className={cn("h-full transition-all duration-500", tone)}
++        style={{ width: `${score}%` }}
++      />
+     </div>
+   );
+ }
+@@ -148,7 +157,8 @@ export function SimBanner({ text }: { text?: string | undefined }) {
+   return (
+     <div className="label-mono flex items-center gap-2 border border-signal/30 bg-signal/8 px-2.5 py-1 text-signal">
+       <span className="size-1.5 rounded-full bg-signal animate-pulse-signal" />
+-      {text ?? "Simulated data — Prototype V1. No real vessel, camera or network systems connected."}
++      {text ??
++        "Simulated data — Prototype V1. No real vessel, camera or network systems connected."}
+     </div>
+   );
+ }
+diff --git a/src/lib/seashield/backend.ts b/src/lib/seashield/backend.ts
+index d590e8e..27f48fd 100644
+--- a/src/lib/seashield/backend.ts
++++ b/src/lib/seashield/backend.ts
+@@ -4,18 +4,62 @@ import type { Camera, Incident, SecurityEvent, Severity, Vessel } from "./types"
+ const API_URL = (import.meta.env["VITE_API_URL"] ?? "http://localhost:8000").replace(/\/$/, "");
+ const WS_URL = API_URL.replace(/^http/, "ws") + "/ws/security";
+ 
+-type ApiVessel = { id: string; name: string; imo: string; score: number; status: string; last_communication?: string };
+-type ApiCamera = { id: string; vessel_id: string; location: string; online: boolean; recording: boolean; last_heartbeat?: string };
+-type ApiEvent = { id?: number; event_id?: string; timestamp: string; vessel_id: string; event_type: string; category: string; severity: string; source: string; description: string; title?: string; status?: string; acknowledged?: boolean };
++type ApiVessel = {
++  id: string;
++  name: string;
++  imo: string;
++  score: number;
++  status: string;
++  last_communication?: string;
++};
++type ApiCamera = {
++  id: string;
++  vessel_id: string;
++  location: string;
++  online: boolean;
++  recording: boolean;
++  last_heartbeat?: string;
++};
++type ApiEvent = {
++  id?: number;
++  event_id?: string;
++  timestamp: string;
++  vessel_id: string;
++  event_type: string;
++  category: string;
++  severity: string;
++  source: string;
++  description: string;
++  title?: string;
++  status?: string;
++  acknowledged?: boolean;
++};
+ type ApiNote = { note_id: string; author: string; body: string; created_at: string };
+ type ApiTimelineEntry = { id: string; text: string; actor?: string | null; created_at: string };
+-type ApiIncident = { incident_id: string; vessel_id: string; title: string; type: string; severity: string; status: string; created_at: string; updated_at: string; related_event_ids?: string[]; assigned_operator?: string; investigation_notes?: string; notes?: ApiNote[]; timeline?: ApiTimelineEntry[] };
++type ApiIncident = {
++  incident_id: string;
++  vessel_id: string;
++  title: string;
++  type: string;
++  severity: string;
++  status: string;
++  created_at: string;
++  updated_at: string;
++  related_event_ids?: string[];
++  assigned_operator?: string;
++  investigation_notes?: string;
++  notes?: ApiNote[];
++  timeline?: ApiTimelineEntry[];
++};
+ 
+ const severity = (value: string): Severity => {
+   const normalized = value.toLowerCase();
+-  return ["critical", "high", "medium", "low", "info"].includes(normalized) ? normalized as Severity : "info";
++  return ["critical", "high", "medium", "low", "info"].includes(normalized)
++    ? (normalized as Severity)
++    : "info";
+ };
+-const stateFor = (score: number): Vessel["securityState"] => score >= 86 ? "secure" : score >= 72 ? "elevated" : score >= 55 ? "warning" : "critical";
++const stateFor = (score: number): Vessel["securityState"] =>
++  score >= 86 ? "secure" : score >= 72 ? "elevated" : score >= 55 ? "warning" : "critical";
+ // SQLite returns timestamps without a UTC offset; treat those as UTC, not browser-local time.
+ const HAS_TZ = /(?:Z|[+-]\d{2}:?\d{2})$/i;
+ const dateMs = (value?: string) => {
+@@ -28,7 +72,13 @@ function eventCategory(event: ApiEvent): SecurityEvent["category"] {
+   const type = event.event_type.toLowerCase();
+   if (type.includes("camera")) return "camera";
+   if (type.includes("access")) return "access";
+-  if (type.includes("sensor") || type.includes("smoke") || type.includes("fire") || type.includes("temperature")) return "sensor";
++  if (
++    type.includes("sensor") ||
++    type.includes("smoke") ||
++    type.includes("fire") ||
++    type.includes("temperature")
++  )
++    return "sensor";
+   if (type.includes("gps") || type.includes("ais")) return "navigation";
+   return event.category.toLowerCase() === "cyber" ? "cyber" : "system";
+ }
+@@ -36,24 +86,63 @@ function incidentStatus(value: string): Incident["status"] {
+   const normalized = value.toLowerCase();
+   if (normalized === "new") return "open";
+   if (normalized === "resolved" || normalized === "false positive") return "closed";
+-  return ["open", "investigating", "contained", "closed"].includes(normalized) ? normalized as Incident["status"] : "open";
++  return ["open", "investigating", "contained", "closed"].includes(normalized)
++    ? (normalized as Incident["status"])
++    : "open";
+ }
+ async function request<T>(path: string, options?: RequestInit): Promise<T> {
+-  const response = await fetch(`${API_URL}${path}`, { ...options, credentials: "include", headers: { "Content-Type": "application/json", ...options?.headers } });
++  const response = await fetch(`${API_URL}${path}`, {
++    ...options,
++    credentials: "include",
++    headers: { "Content-Type": "application/json", ...options?.headers },
++  });
+   if (response.status === 401 && !path.startsWith("/api/auth/")) {
+     // backend runs with AUTH_REQUIRED=true and our session is missing/expired
+     setAuth({ required: true });
+   }
+   if (!response.ok) throw new Error(`SeaShield API request failed (${response.status})`);
+-  return response.status === 204 ? undefined as T : response.json() as Promise<T>;
++  return response.status === 204 ? (undefined as T) : (response.json() as Promise<T>);
+ }
+ 
+ function mapIncident(i: ApiIncident): Incident {
+-  const notes = (i.notes ?? []).map((n) => ({ id: n.note_id, ts: dateMs(n.created_at), author: n.author, body: n.body }));
++  const notes = (i.notes ?? []).map((n) => ({
++    id: n.note_id,
++    ts: dateMs(n.created_at),
++    author: n.author,
++    body: n.body,
++  }));
+   // legacy single-text notes from older backends
+-  if (!notes.length && i.investigation_notes) notes.push({ id: `${i.incident_id}-note`, ts: dateMs(i.updated_at), author: i.assigned_operator ?? "Security Operator", body: i.investigation_notes });
+-  const timeline = (i.timeline ?? [{ id: `${i.incident_id}-opened`, text: "Incident opened.", created_at: i.created_at }]).map((t) => ({ id: t.id, ts: dateMs(t.created_at), text: t.actor ? `${t.text} (${t.actor})` : t.text }));
+-  return { id: i.incident_id, ref: i.incident_id, title: i.title, vesselId: i.vessel_id, system: i.type, severity: severity(i.severity), status: incidentStatus(i.status), assignee: i.assigned_operator ?? "Security Operator", openedAt: dateMs(i.created_at), updatedAt: dateMs(i.updated_at), eventIds: i.related_event_ids ?? [], notes, timeline };
++  if (!notes.length && i.investigation_notes)
++    notes.push({
++      id: `${i.incident_id}-note`,
++      ts: dateMs(i.updated_at),
++      author: i.assigned_operator ?? "Security Operator",
++      body: i.investigation_notes,
++    });
++  const timeline = (
++    i.timeline ?? [
++      { id: `${i.incident_id}-opened`, text: "Incident opened.", created_at: i.created_at },
++    ]
++  ).map((t) => ({
++    id: t.id,
++    ts: dateMs(t.created_at),
++    text: t.actor ? `${t.text} (${t.actor})` : t.text,
++  }));
++  return {
++    id: i.incident_id,
++    ref: i.incident_id,
++    title: i.title,
++    vesselId: i.vessel_id,
++    system: i.type,
++    severity: severity(i.severity),
++    status: incidentStatus(i.status),
++    assignee: i.assigned_operator ?? "Security Operator",
++    openedAt: dateMs(i.created_at),
++    updatedAt: dateMs(i.updated_at),
++    eventIds: i.related_event_ids ?? [],
++    notes,
++    timeline,
++  };
+ }
+ 
+ let refreshSequence = 0;
+@@ -61,14 +150,44 @@ export async function refreshSeaShieldBackend() {
+   // Only the most recently started refresh may write to the store, so a slow
+   // response can never overwrite newer data.
+   const sequence = ++refreshSequence;
+-  const [health, vessels, cameras, events, incidents] = await Promise.all([request<{ status: string }>("/health"), request<ApiVessel[]>("/api/v1/vessels"), request<ApiCamera[]>("/api/v1/cameras"), request<ApiEvent[]>("/api/security-events?limit=100"), request<ApiIncident[]>("/api/v1/incidents")]);
++  const [health, vessels, cameras, events, incidents] = await Promise.all([
++    request<{ status: string }>("/health"),
++    request<ApiVessel[]>("/api/v1/vessels"),
++    request<ApiCamera[]>("/api/v1/cameras"),
++    request<ApiEvent[]>("/api/security-events?limit=100"),
++    request<ApiIncident[]>("/api/v1/incidents"),
++  ]);
+   if (sequence !== refreshSequence) return;
+   hydrateFromBackend({
+     health: health.status,
+-    vessels: vessels.map((v) => ({ id: v.id, name: v.name, imo: v.imo, score: v.score, state: stateFor(v.score), lastComms: dateMs(v.last_communication) })),
+-    cameras: cameras.map((c) => ({ id: c.id, vesselId: c.vessel_id, location: c.location, online: c.online, recording: c.recording, lastFrame: dateMs(c.last_heartbeat) })),
++    vessels: vessels.map((v) => ({
++      id: v.id,
++      name: v.name,
++      imo: v.imo,
++      score: v.score,
++      state: stateFor(v.score),
++      lastComms: dateMs(v.last_communication),
++    })),
++    cameras: cameras.map((c) => ({
++      id: c.id,
++      vesselId: c.vessel_id,
++      location: c.location,
++      online: c.online,
++      recording: c.recording,
++      lastFrame: dateMs(c.last_heartbeat),
++    })),
+     // event_id (not the numeric DB id) is what incidents reference in related_event_ids
+-    events: events.map((e) => ({ id: e.event_id ?? String(e.id ?? crypto.randomUUID()), ts: dateMs(e.timestamp), vesselId: e.vessel_id, category: eventCategory(e), severity: severity(e.severity), title: e.title ?? e.event_type.replaceAll("_", " "), detail: e.description, source: e.source, acknowledged: Boolean(e.acknowledged) || e.status?.toLowerCase() === "resolved" })),
++    events: events.map((e) => ({
++      id: e.event_id ?? String(e.id ?? crypto.randomUUID()),
++      ts: dateMs(e.timestamp),
++      vesselId: e.vessel_id,
++      category: eventCategory(e),
++      severity: severity(e.severity),
++      title: e.title ?? e.event_type.replaceAll("_", " "),
++      detail: e.description,
++      source: e.source,
++      acknowledged: Boolean(e.acknowledged) || e.status?.toLowerCase() === "resolved",
++    })),
+     incidents: incidents.map(mapIncident),
+   });
+ }
+@@ -94,34 +213,67 @@ export async function runBackendScenario(uiScenario: string, vesselId: string) {
+   });
+   await refreshSeaShieldBackend();
+   const label = eventType.replaceAll("_", " ").toLowerCase();
+-  return result?.correlation ? `${label} injected · correlated: ${result.correlation.title}` : `${label} injected`;
++  return result?.correlation
++    ? `${label} injected · correlated: ${result.correlation.title}`
++    : `${label} injected`;
++}
++export async function resetBackendSimulation() {
++  await request("/api/v1/simulation/reset", { method: "POST" });
++  await refreshSeaShieldBackend();
+ }
+-export async function resetBackendSimulation() { await request("/api/v1/simulation/reset", { method: "POST" }); await refreshSeaShieldBackend(); }
+-const backendStatus: Record<Incident["status"], string> = { open: "NEW", investigating: "INVESTIGATING", contained: "CONTAINED", closed: "RESOLVED" };
+-export async function updateBackendIncident(id: string, patch: { status?: Incident["status"]; severity?: Severity; assignee?: string }, actor?: string) {
++const backendStatus: Record<Incident["status"], string> = {
++  open: "NEW",
++  investigating: "INVESTIGATING",
++  contained: "CONTAINED",
++  closed: "RESOLVED",
++};
++export async function updateBackendIncident(
++  id: string,
++  patch: { status?: Incident["status"]; severity?: Severity; assignee?: string },
++  actor?: string,
++) {
+   const body = {
+     ...(patch.status ? { status: backendStatus[patch.status] } : {}),
+     ...(patch.severity ? { severity: patch.severity.toUpperCase() } : {}),
+     ...(patch.assignee ? { assigned_operator: patch.assignee } : {}),
+     ...(actor ? { actor } : {}),
+   };
+-  await request(`/api/v1/incidents/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(body) });
++  await request(`/api/v1/incidents/${encodeURIComponent(id)}`, {
++    method: "PATCH",
++    body: JSON.stringify(body),
++  });
+   await refreshSeaShieldBackend();
+ }
+-export async function createBackendIncident(input: { title: string; vesselId: string; system: string; severity: Severity; assignee: string }, createdBy?: string) {
++export async function createBackendIncident(
++  input: { title: string; vesselId: string; system: string; severity: Severity; assignee: string },
++  createdBy?: string,
++) {
+   const created = await request<ApiIncident>("/api/v1/incidents", {
+     method: "POST",
+-    body: JSON.stringify({ title: input.title, vessel_id: input.vesselId, system: input.system, severity: input.severity.toUpperCase(), assigned_operator: input.assignee, created_by: createdBy }),
++    body: JSON.stringify({
++      title: input.title,
++      vessel_id: input.vesselId,
++      system: input.system,
++      severity: input.severity.toUpperCase(),
++      assigned_operator: input.assignee,
++      created_by: createdBy,
++    }),
+   });
+   await refreshSeaShieldBackend();
+   return mapIncident(created);
+ }
+ export async function addBackendIncidentNote(id: string, body: string, author: string) {
+-  await request(`/api/v1/incidents/${encodeURIComponent(id)}/notes`, { method: "POST", body: JSON.stringify({ body, author }) });
++  await request(`/api/v1/incidents/${encodeURIComponent(id)}/notes`, {
++    method: "POST",
++    body: JSON.stringify({ body, author }),
++  });
+   await refreshSeaShieldBackend();
+ }
+ export async function acknowledgeBackendEvent(id: string, acknowledgedBy: string) {
+-  await request(`/api/security-events/${encodeURIComponent(id)}/acknowledge`, { method: "POST", body: JSON.stringify({ acknowledged_by: acknowledgedBy }) });
++  await request(`/api/security-events/${encodeURIComponent(id)}/acknowledge`, {
++    method: "POST",
++    body: JSON.stringify({ acknowledged_by: acknowledgedBy }),
++  });
+   await refreshSeaShieldBackend();
+ }
+ /* ------------------------------------------------------------------ */
+@@ -139,7 +291,10 @@ let refreshTimer: number | undefined;
+ /** Coalesce bursts of WebSocket messages (one scenario emits several) into one refresh. */
+ function scheduleRefresh(delay = REFRESH_DEBOUNCE_MS) {
+   window.clearTimeout(refreshTimer);
+-  refreshTimer = window.setTimeout(() => void refreshSeaShieldBackend().catch(() => hydrateFromBackend({ health: "degraded" })), delay);
++  refreshTimer = window.setTimeout(
++    () => void refreshSeaShieldBackend().catch(() => hydrateFromBackend({ health: "degraded" })),
++    delay,
++  );
+ }
+ 
+ function openSocket() {
+@@ -171,14 +326,19 @@ type ApiUser = { email: string; name: string; role: string };
+ 
+ /** Ask the backend whether a login is needed and whether we already have a session. */
+ async function checkAuth() {
+-  const config = await request<{ auth_required: boolean }>("/api/auth/config").catch(() => ({ auth_required: false }));
++  const config = await request<{ auth_required: boolean }>("/api/auth/config").catch(() => ({
++    auth_required: false,
++  }));
+   if (!config.auth_required) return setAuth({ required: false });
+   const user = await request<ApiUser>("/api/auth/me").catch(() => undefined);
+   setAuth(user ? { required: true, user } : { required: true });
+ }
+ 
+ export async function login(email: string, password: string) {
+-  const response = await request<{ user: ApiUser }>("/api/auth/login", { method: "POST", body: JSON.stringify({ email, password }) });
++  const response = await request<{ user: ApiUser }>("/api/auth/login", {
++    method: "POST",
++    body: JSON.stringify({ email, password }),
++  });
+   setAuth({ required: true, user: response.user });
+   window.clearTimeout(reconnectTimer);
+   reconnectAttempt = 0;
+diff --git a/src/lib/seashield/data.ts b/src/lib/seashield/data.ts
+index e7140d5..363817d 100644
+--- a/src/lib/seashield/data.ts
++++ b/src/lib/seashield/data.ts
+@@ -140,13 +140,7 @@ const VESSEL_SEED: Array<
+   },
+ ];
+ 
+-const OPERATORS = [
+-  "K. Halvorsen",
+-  "M. Okonjo",
+-  "D. Reyes",
+-  "S. Lindqvist",
+-  "A. Nasser",
+-];
++const OPERATORS = ["K. Halvorsen", "M. Okonjo", "D. Reyes", "S. Lindqvist", "A. Nasser"];
+ 
+ function stateScore(state: Vessel["securityState"]) {
+   return state === "secure"
+@@ -422,7 +416,11 @@ function makeIncident(
+       },
+     ],
+     timeline: [
+-      { id: `${ref}-t1`, ts: openedAt, text: `Incident opened from correlated events (${system}).` },
++      {
++        id: `${ref}-t1`,
++        ts: openedAt,
++        text: `Incident opened from correlated events (${system}).`,
++      },
+       { id: `${ref}-t2`, ts: openedAt + 300_000, text: `Assigned to ${assignee}.` },
+       { id: `${ref}-t3`, ts: openedAt + 600_000, text: `Status set to ${status}.` },
+     ],
+diff --git a/src/lib/seashield/services.ts b/src/lib/seashield/services.ts
+index a9dcdd9..347758c 100644
+--- a/src/lib/seashield/services.ts
++++ b/src/lib/seashield/services.ts
+@@ -42,13 +42,11 @@ export const vesselService = {
+ };
+ 
+ export const cameraService = {
+-  list: (vesselId: string | "all" = "all"): Camera[] =>
+-    scope(store.getState().cameras, vesselId),
++  list: (vesselId: string | "all" = "all"): Camera[] => scope(store.getState().cameras, vesselId),
+ };
+ 
+ export const sensorService = {
+-  list: (vesselId: string | "all" = "all"): Sensor[] =>
+-    scope(store.getState().sensors, vesselId),
++  list: (vesselId: string | "all" = "all"): Sensor[] => scope(store.getState().sensors, vesselId),
+ };
+ 
+ export const eventService = {
+@@ -126,14 +124,13 @@ export const securityService = {
+       cyberTotal: cyber.length,
+       unauthorizedAccess: access.filter((a) => a.result !== "authorized").length,
+       avgScore: avg,
+-      fleetState:
+-        vessels.some((v) => v.securityState === "critical")
+-          ? ("critical" as const)
+-          : vessels.some((v) => v.securityState === "warning")
+-            ? ("warning" as const)
+-            : vessels.some((v) => v.securityState === "elevated")
+-              ? ("elevated" as const)
+-              : ("secure" as const),
++      fleetState: vessels.some((v) => v.securityState === "critical")
++        ? ("critical" as const)
++        : vessels.some((v) => v.securityState === "warning")
++          ? ("warning" as const)
++          : vessels.some((v) => v.securityState === "elevated")
++            ? ("elevated" as const)
++            : ("secure" as const),
+     };
+   },
+ };
+diff --git a/src/lib/seashield/store.ts b/src/lib/seashield/store.ts
+index 5348f6e..9a6c379 100644
+--- a/src/lib/seashield/store.ts
++++ b/src/lib/seashield/store.ts
+@@ -47,8 +47,20 @@ export function getState() {
+ 
+ type BackendPayload = {
+   health: string;
+-  vessels?: Array<Pick<Vessel, "id" | "name" | "imo" | "lastComms"> & { score: number; state: Vessel["securityState"] }>;
+-  cameras?: Array<{ id: string; vesselId: string; location: string; online: boolean; recording: boolean; lastFrame: number }>;
++  vessels?: Array<
++    Pick<Vessel, "id" | "name" | "imo" | "lastComms"> & {
++      score: number;
++      state: Vessel["securityState"];
++    }
++  >;
++  cameras?: Array<{
++    id: string;
++    vesselId: string;
++    location: string;
++    online: boolean;
++    recording: boolean;
++    lastFrame: number;
++  }>;
+   events?: SecurityEvent[];
+   incidents?: Incident[];
+ };
+@@ -62,7 +74,9 @@ export function hydrateFromBackend(payload: BackendPayload) {
+     // therefore no longer decides which vessel gets which fixtures. Vessels beyond the number
+     // of fixture slots get no simulated fixtures instead of sharing another vessel's.
+     const slotOf = new Map(
+-      [...payload.vessels].sort((a, b) => a.id.localeCompare(b.id)).map((v, index) => [v.id, index]),
++      [...payload.vessels]
++        .sort((a, b) => a.id.localeCompare(b.id))
++        .map((v, index) => [v.id, index]),
+     );
+     const fixtureOwner = new Map<string, string>(); // seeded vessel id -> backend vessel id
+     state.vessels = payload.vessels.map((v) => {
+@@ -88,10 +102,26 @@ export function hydrateFromBackend(payload: BackendPayload) {
+     state.access = owned(seeded.access);
+     state.cyber = owned(seeded.cyber);
+   }
+-  if (payload.cameras) state.cameras = payload.cameras.map((camera) => ({ id: camera.id, vesselId: camera.vesselId, zone: camera.location, label: `CAM ${camera.location}`, state: camera.online ? "online" : "offline", recording: camera.recording, uptime: camera.online ? 99.9 : 0, fps: camera.online ? 25 : 0, lastFrame: camera.lastFrame }));
++  if (payload.cameras)
++    state.cameras = payload.cameras.map((camera) => ({
++      id: camera.id,
++      vesselId: camera.vesselId,
++      zone: camera.location,
++      label: `CAM ${camera.location}`,
++      state: camera.online ? "online" : "offline",
++      recording: camera.recording,
++      uptime: camera.online ? 99.9 : 0,
++      fps: camera.online ? 25 : 0,
++      lastFrame: camera.lastFrame,
++    }));
+   if (payload.events) state.events = payload.events.sort((a, b) => b.ts - a.ts);
+-  if (payload.incidents) state.incidents = payload.incidents.sort((a, b) => b.updatedAt - a.updatedAt);
+-  state.connection = { ...state.connection, backend: payload.health === "ok" ? "online" : "degraded", mode: payload.health === "ok" ? "V1.8 ENGINE CONNECTED" : "V1.8 ENGINE UNAVAILABLE" };
++  if (payload.incidents)
++    state.incidents = payload.incidents.sort((a, b) => b.updatedAt - a.updatedAt);
++  state.connection = {
++    ...state.connection,
++    backend: payload.health === "ok" ? "online" : "degraded",
++    mode: payload.health === "ok" ? "V1.8 ENGINE CONNECTED" : "V1.8 ENGINE UNAVAILABLE",
++  };
+   emit();
+ }
+ 
+@@ -222,7 +252,10 @@ export function addIncidentNote(id: string, body: string, author: string) {
+           ...i,
+           updatedAt: now(),
+           notes: [...i.notes, { id: uid("note"), ts: now(), author, body }],
+-          timeline: [...i.timeline, { id: uid("tl"), ts: now(), text: "Investigation note added." }],
++          timeline: [
++            ...i.timeline,
++            { id: uid("tl"), ts: now(), text: "Investigation note added." },
++          ],
+         }
+       : i,
+   );
+@@ -257,7 +290,12 @@ export const SCENARIOS: { id: ScenarioId; label: string; group: string; severity
+   { id: "unauthorized-access", label: "Unauthorized access", group: "Access", severity: "high" },
+   { id: "unknown-device", label: "Unknown network device", group: "Cyber", severity: "medium" },
+   { id: "brute-force", label: "Brute-force login attempt", group: "Cyber", severity: "high" },
+-  { id: "suspicious-traffic", label: "Suspicious network traffic", group: "Cyber", severity: "high" },
++  {
++    id: "suspicious-traffic",
++    label: "Suspicious network traffic",
++    group: "Cyber",
++    severity: "high",
++  },
+   { id: "gps-anomaly", label: "GPS / AIS anomaly", group: "Navigation", severity: "medium" },
+   { id: "sensor-failure", label: "Sensor failure", group: "Sensors", severity: "medium" },
+   { id: "firewall-block", label: "Firewall block", group: "Cyber", severity: "low" },
+@@ -482,9 +520,7 @@ export function triggerScenario(scenario: ScenarioId, vesselId: string) {
+       break;
+     }
+     case "gps-anomaly": {
+-      state.vessels = state.vessels.map((v) =>
+-        v.id === vid ? { ...v, gpsAis: "degraded" } : v,
+-      );
++      state.vessels = state.vessels.map((v) => (v.id === vid ? { ...v, gpsAis: "degraded" } : v));
+       pushEvent({
+         vesselId: vid,
+         category: "navigation",
+@@ -605,7 +641,9 @@ export function resetSimulation() {
+ export function tick() {
+   clockOffset += 2000;
+   state.cameras = state.cameras.map((c) =>
+-    c.state === "online" ? { ...c, lastFrame: now(), fps: 24 + ((counter + Math.round(c.uptime)) % 3) } : c,
++    c.state === "online"
++      ? { ...c, lastFrame: now(), fps: 24 + ((counter + Math.round(c.uptime)) % 3) }
++      : c,
+   );
+   state.vessels = state.vessels.map((v) => ({ ...v, lastComms: v.lastComms }));
+   state.sensors = state.sensors.map((s) =>
+diff --git a/src/lib/seashield/types.ts b/src/lib/seashield/types.ts
+index f909108..88f15d3 100644
+--- a/src/lib/seashield/types.ts
++++ b/src/lib/seashield/types.ts
+@@ -4,13 +4,7 @@ export type SecurityState = "secure" | "elevated" | "warning" | "critical";
+ 
+ export type OnlineState = "online" | "degraded" | "offline";
+ 
+-export type EventCategory =
+-  | "cyber"
+-  | "access"
+-  | "sensor"
+-  | "camera"
+-  | "navigation"
+-  | "system";
++export type EventCategory = "cyber" | "access" | "sensor" | "camera" | "navigation" | "system";
+ 
+ export interface SecurityEvent {
+   id: string;
+@@ -37,14 +31,7 @@ export interface Camera {
+   lastFrame: number;
+ }
+ 
+-export type SensorKind =
+-  | "fire"
+-  | "smoke"
+-  | "temperature"
+-  | "water"
+-  | "motion"
+-  | "door"
+-  | "bilge";
++export type SensorKind = "fire" | "smoke" | "temperature" | "water" | "motion" | "door" | "bilge";
+ 
+ export interface Sensor {
+   id: string;
+@@ -72,12 +59,7 @@ export interface CyberFinding {
+   id: string;
+   ts: number;
+   vesselId: string;
+-  kind:
+-    | "unknown-device"
+-    | "failed-auth"
+-    | "suspicious-traffic"
+-    | "firewall-block"
+-    | "anomaly";
++  kind: "unknown-device" | "failed-auth" | "suspicious-traffic" | "firewall-block" | "anomaly";
+   severity: Severity;
+   summary: string;
+   host: string;
+diff --git a/src/routes/README.md b/src/routes/README.md
+index 441a4e8..0990d2f 100644
+--- a/src/routes/README.md
++++ b/src/routes/README.md
+@@ -7,15 +7,15 @@ is `src/routes/__root.tsx`.
+ 
+ ## Conventions
+ 
+-| File | URL |
+-| --- | --- |
+-| `index.tsx` | `/` |
+-| `about.tsx` | `/about` |
+-| `users/index.tsx` | `/users` |
+-| `users/$id.tsx` | `/users/:id` (dynamic — bare `$`, no curly braces) |
+-| `posts/{-$category}.tsx` | `/posts/:category?` (optional segment) |
+-| `files/$.tsx` | `/files/*` (splat — read via `_splat` param, never `*`) |
+-| `_layout.tsx` | layout route (renders children via `<Outlet />`) |
+-| `__root.tsx` | app shell — wraps every page; preserve `<Outlet />` |
++| File                     | URL                                                     |
++| ------------------------ | ------------------------------------------------------- |
++| `index.tsx`              | `/`                                                     |
++| `about.tsx`              | `/about`                                                |
++| `users/index.tsx`        | `/users`                                                |
++| `users/$id.tsx`          | `/users/:id` (dynamic — bare `$`, no curly braces)      |
++| `posts/{-$category}.tsx` | `/posts/:category?` (optional segment)                  |
++| `files/$.tsx`            | `/files/*` (splat — read via `_splat` param, never `*`) |
++| `_layout.tsx`            | layout route (renders children via `<Outlet />`)        |
++| `__root.tsx`             | app shell — wraps every page; preserve `<Outlet />`     |
+ 
+ `routeTree.gen.ts` is auto-generated. Don't edit it by hand.
+diff --git a/src/routes/access-control.tsx b/src/routes/access-control.tsx
+index 0374dd9..4ded223 100644
+--- a/src/routes/access-control.tsx
++++ b/src/routes/access-control.tsx
+@@ -36,7 +36,11 @@ function AccessView() {
+   const access = useSeaShield((s) => s.access);
+   const vessels = useSeaShield((s) => s.vessels);
+   const rows = useMemo(
+-    () => securityService.accessRecords(scope).slice().sort((a, b) => b.ts - a.ts),
++    () =>
++      securityService
++        .accessRecords(scope)
++        .slice()
++        .sort((a, b) => b.ts - a.ts),
+     [scope, access],
+   );
+   const name = (id: string) => vessels.find((v) => v.id === id)?.name ?? id;
+@@ -71,11 +75,24 @@ function AccessView() {
+         </div>
+ 
+         <div className="grid gap-2 xl:grid-cols-[1fr_18rem]">
+-          <Panel title="Access event log" meta={`${rows.length} records`} className="max-h-[34rem]" scroll>
++          <Panel
++            title="Access event log"
++            meta={`${rows.length} records`}
++            className="max-h-[34rem]"
++            scroll
++          >
+             <table className="w-full text-xs">
+               <thead className="sticky top-0 bg-panel-header">
+                 <tr className="border-b border-border">
+-                  {["Timestamp", "Vessel", "Area", "Credential", "Holder", "Restricted", "Result"].map((h) => (
++                  {[
++                    "Timestamp",
++                    "Vessel",
++                    "Area",
++                    "Credential",
++                    "Holder",
++                    "Restricted",
++                    "Result",
++                  ].map((h) => (
+                     <th key={h} className="label-mono px-3 py-1.5 text-left font-medium">
+                       {h}
+                     </th>
+@@ -88,12 +105,16 @@ function AccessView() {
+                     <td className="tabular px-3 py-1.5 whitespace-nowrap text-muted-foreground">
+                       {utcStamp(r.ts)}
+                     </td>
+-                    <td className="px-3 py-1.5 whitespace-nowrap text-muted-foreground">{name(r.vesselId)}</td>
++                    <td className="px-3 py-1.5 whitespace-nowrap text-muted-foreground">
++                      {name(r.vesselId)}
++                    </td>
+                     <td className="px-3 py-1.5">{r.area}</td>
+                     <td className="tabular px-3 py-1.5">{r.credential}</td>
+                     <td className="px-3 py-1.5 text-muted-foreground">{r.person}</td>
+                     <td className="label-mono px-3 py-1.5">{r.restricted ? "yes" : "no"}</td>
+-                    <td className={cn("label-mono px-3 py-1.5 font-semibold", RESULT_CLS[r.result])}>
++                    <td
++                      className={cn("label-mono px-3 py-1.5 font-semibold", RESULT_CLS[r.result])}
++                    >
+                       {r.result}
+                     </td>
+                   </tr>
+@@ -105,9 +126,14 @@ function AccessView() {
+           <Panel title="Restricted areas" meta="simulated zones" scroll>
+             <ul>
+               {areas.map((a) => {
+-                const violations = rows.filter((r) => r.area === a && r.result !== "authorized").length;
++                const violations = rows.filter(
++                  (r) => r.area === a && r.result !== "authorized",
++                ).length;
+                 return (
+-                  <li key={a} className="flex items-center justify-between border-b border-border/50 px-3 py-2 text-xs">
++                  <li
++                    key={a}
++                    className="flex items-center justify-between border-b border-border/50 px-3 py-2 text-xs"
++                  >
+                     <span>{a}</span>
+                     <span className={cn("tabular", violations ? "text-warning" : "text-secure")}>
+                       {violations} violations
+diff --git a/src/routes/cameras.tsx b/src/routes/cameras.tsx
+index 08cfc26..26c8c78 100644
+--- a/src/routes/cameras.tsx
++++ b/src/routes/cameras.tsx
+@@ -78,7 +78,11 @@ function CamerasView() {
+         ))}
+         <div className="ml-auto flex gap-2">
+           <Metric label="Feeds in view" value={rows.length} />
+-          <Metric label="Online" value={`${online}/${rows.length}`} tone={online === rows.length ? "secure" : "caution"} />
++          <Metric
++            label="Online"
++            value={`${online}/${rows.length}`}
++            tone={online === rows.length ? "secure" : "caution"}
++          />
+         </div>
+       </div>
+       <div className="min-h-0 flex-1 overflow-auto p-2">
+diff --git a/src/routes/cybersecurity.tsx b/src/routes/cybersecurity.tsx
+index 4b9fb9a..f826772 100644
+--- a/src/routes/cybersecurity.tsx
++++ b/src/routes/cybersecurity.tsx
+@@ -3,7 +3,13 @@ import { useMemo } from "react";
+ import { securityService } from "@/lib/seashield/services";
+ import { useSeaShield } from "@/lib/seashield/useSeaShield";
+ import { utcTime } from "@/lib/seashield/format";
+-import { Metric, PageHeader, Panel, SeverityTag, SimBanner } from "@/components/seashield/primitives";
++import {
++  Metric,
++  PageHeader,
++  Panel,
++  SeverityTag,
++  SimBanner,
++} from "@/components/seashield/primitives";
+ import { EventStream } from "@/components/seashield/EventStream";
+ import type { CyberFinding } from "@/lib/seashield/types";
+ 
+@@ -19,7 +25,8 @@ export const Route = createFileRoute("/cybersecurity")({
+       { property: "og:title", content: "Cybersecurity Monitoring — SeaShield" },
+       {
+         property: "og:description",
+-        content: "Rule-based, fully simulated cyber event monitoring for vessel IT and OT networks.",
++        content:
++          "Rule-based, fully simulated cyber event monitoring for vessel IT and OT networks.",
+       },
+     ],
+   }),
+@@ -73,7 +80,12 @@ function CyberView() {
+           ))}
+         </div>
+ 
+-        <Panel title="Cyber findings" meta={`${rows.length} records`} className="max-h-[26rem]" scroll>
++        <Panel
++          title="Cyber findings"
++          meta={`${rows.length} records`}
++          className="max-h-[26rem]"
++          scroll
++        >
+           <table className="w-full text-xs">
+             <thead className="sticky top-0 bg-panel-header">
+               <tr className="border-b border-border">
+@@ -92,7 +104,9 @@ function CyberView() {
+                     <SeverityTag severity={r.severity} />
+                   </td>
+                   <td className="label-mono px-3 py-1.5">{r.kind}</td>
+-                  <td className="px-3 py-1.5 whitespace-nowrap text-muted-foreground">{name(r.vesselId)}</td>
++                  <td className="px-3 py-1.5 whitespace-nowrap text-muted-foreground">
++                    {name(r.vesselId)}
++                  </td>
+                   <td className="px-3 py-1.5">{r.summary}</td>
+                   <td className="tabular px-3 py-1.5 text-muted-foreground">{r.host}</td>
+                   <td className="tabular px-3 py-1.5">{r.count}</td>
+@@ -102,7 +116,12 @@ function CyberView() {
+           </table>
+         </Panel>
+ 
+-        <Panel title="Correlated cyber event stream" meta="rule-based, not AI" className="min-h-72" scroll>
++        <Panel
++          title="Correlated cyber event stream"
++          meta="rule-based, not AI"
++          className="min-h-72"
++          scroll
++        >
+           <EventStream limit={40} />
+         </Panel>
+       </div>
+diff --git a/src/routes/fleet.tsx b/src/routes/fleet.tsx
+index 75c6d7b..7d11979 100644
+--- a/src/routes/fleet.tsx
++++ b/src/routes/fleet.tsx
+@@ -1,7 +1,13 @@
+ import { createFileRoute, Link } from "@tanstack/react-router";
+ import { useSeaShield } from "@/lib/seashield/useSeaShield";
+ import { elapsed, onlineText, stateColor } from "@/lib/seashield/format";
+-import { PageHeader, Panel, ScoreBar, SimBanner, StatusDot } from "@/components/seashield/primitives";
++import {
++  PageHeader,
++  Panel,
++  ScoreBar,
++  SimBanner,
++  StatusDot,
++} from "@/components/seashield/primitives";
+ import { now } from "@/lib/seashield/store";
+ import { cn } from "@/lib/utils";
+ 
+@@ -96,11 +102,21 @@ function FleetView() {
+                         <span className="tabular">{v.securityScore}</span>
+                       </div>
+                     </td>
+-                    <td className={cn("tabular px-3 py-2", online === cams.length ? "text-secure" : "text-caution")}>
++                    <td
++                      className={cn(
++                        "tabular px-3 py-2",
++                        online === cams.length ? "text-secure" : "text-caution",
++                      )}
++                    >
+                       {online}/{cams.length}
+                     </td>
+                     <td className={cn("label-mono px-3 py-2", stateColor[v.cyber])}>{v.cyber}</td>
+-                    <td className={cn("tabular px-3 py-2", open.length ? "text-warning" : "text-muted-foreground")}>
++                    <td
++                      className={cn(
++                        "tabular px-3 py-2",
++                        open.length ? "text-warning" : "text-muted-foreground",
++                      )}
++                    >
+                       {open.length}
+                     </td>
+                     <td className={cn("tabular px-3 py-2", onlineText[v.network])}>
+diff --git a/src/routes/incidents.tsx b/src/routes/incidents.tsx
+index d0bfe35..5ee8e96 100644
+--- a/src/routes/incidents.tsx
++++ b/src/routes/incidents.tsx
+@@ -20,7 +20,8 @@ export const Route = createFileRoute("/incidents")({
+       { property: "og:title", content: "Incident Management — SeaShield" },
+       {
+         property: "og:description",
+-        content: "Investigate correlated maritime security incidents with timeline and operator notes.",
++        content:
++          "Investigate correlated maritime security incidents with timeline and operator notes.",
+       },
+     ],
+   }),
+@@ -71,11 +72,13 @@ function IncidentsView() {
+           <table className="w-full text-xs">
+             <thead className="sticky top-0 bg-panel-header">
+               <tr className="border-b border-border">
+-                {["Ref", "Sev", "Title", "Vessel", "System", "Status", "Assignee", "Opened"].map((h) => (
+-                  <th key={h} className="label-mono px-3 py-1.5 text-left font-medium">
+-                    {h}
+-                  </th>
+-                ))}
++                {["Ref", "Sev", "Title", "Vessel", "System", "Status", "Assignee", "Opened"].map(
++                  (h) => (
++                    <th key={h} className="label-mono px-3 py-1.5 text-left font-medium">
++                      {h}
++                    </th>
++                  ),
++                )}
+               </tr>
+             </thead>
+             <tbody>
+@@ -92,8 +95,12 @@ function IncidentsView() {
+                   <td className="px-3 py-1.5">
+                     <SeverityTag severity={i.severity} />
+                   </td>
+-                  <td className={cn("px-3 py-1.5 font-medium", severityText[i.severity])}>{i.title}</td>
+-                  <td className="px-3 py-1.5 whitespace-nowrap text-muted-foreground">{name(i.vesselId)}</td>
++                  <td className={cn("px-3 py-1.5 font-medium", severityText[i.severity])}>
++                    {i.title}
++                  </td>
++                  <td className="px-3 py-1.5 whitespace-nowrap text-muted-foreground">
++                    {name(i.vesselId)}
++                  </td>
+                   <td className="px-3 py-1.5 text-muted-foreground">{i.system}</td>
+                   <td className="label-mono px-3 py-1.5">{i.status}</td>
+                   <td className="px-3 py-1.5 text-muted-foreground">{i.assignee}</td>
+@@ -123,7 +130,9 @@ function IncidentsView() {
+                 <Field label="Severity">
+                   <select
+                     value={selected.severity}
+-                    onChange={(e) => incidentService.update(selected.id, { severity: e.target.value as Severity })}
++                    onChange={(e) =>
++                      incidentService.update(selected.id, { severity: e.target.value as Severity })
++                    }
+                     className="h-7 w-full rounded-sm border border-input bg-background px-1 font-mono text-xs"
+                   >
+                     {SEVERITIES.map((s) => (
+@@ -136,7 +145,9 @@ function IncidentsView() {
+                 <Field label="Status">
+                   <select
+                     value={selected.status}
+-                    onChange={(e) => incidentService.setStatus(selected.id, e.target.value as IncidentStatus)}
++                    onChange={(e) =>
++                      incidentService.setStatus(selected.id, e.target.value as IncidentStatus)
++                    }
+                     className="h-7 w-full rounded-sm border border-input bg-background px-1 font-mono text-xs"
+                   >
+                     {STATUSES.map((s) => (
+@@ -149,7 +160,9 @@ function IncidentsView() {
+                 <Field label="Assignee">
+                   <select
+                     value={selected.assignee}
+-                    onChange={(e) => incidentService.update(selected.id, { assignee: e.target.value })}
++                    onChange={(e) =>
++                      incidentService.update(selected.id, { assignee: e.target.value })
++                    }
+                     className="h-7 w-full rounded-sm border border-input bg-background px-1 font-mono text-xs"
+                   >
+                     {ASSIGNEES.map((s) => (
+@@ -195,7 +208,10 @@ function IncidentsView() {
+               <Section title="Investigation notes">
+                 <ul className="space-y-2">
+                   {selected.notes.map((n) => (
+-                    <li key={n.id} className="border border-border bg-secondary/30 px-2 py-1.5 text-xs">
++                    <li
++                      key={n.id}
++                      className="border border-border bg-secondary/30 px-2 py-1.5 text-xs"
++                    >
+                       <div className="label-mono normal-case">
+                         {n.author} · {utcStamp(n.ts)}
+                       </div>
+@@ -301,13 +317,18 @@ function CreateForm({ onDone }: { onDone: () => void }) {
+           onChange={(e) => setSystem(e.target.value)}
+           className="h-8 w-full rounded-sm border border-input bg-background px-1 font-mono text-xs"
+         >
+-          {["CCTV", "Access Control", "Sensors / Safety", "OT / IT Network", "GPS / AIS", "Vessel Systems"].map(
+-            (s) => (
+-              <option key={s} value={s}>
+-                {s}
+-              </option>
+-            ),
+-          )}
++          {[
++            "CCTV",
++            "Access Control",
++            "Sensors / Safety",
++            "OT / IT Network",
++            "GPS / AIS",
++            "Vessel Systems",
++          ].map((s) => (
++            <option key={s} value={s}>
++              {s}
++            </option>
++          ))}
+         </select>
+       </label>
+       <label>
+diff --git a/src/routes/index.tsx b/src/routes/index.tsx
+index 6839913..d7947da 100644
+--- a/src/routes/index.tsx
++++ b/src/routes/index.tsx
+@@ -50,7 +50,9 @@ function Dashboard() {
+     <div className="flex min-h-0 flex-1 flex-col">
+       <PageHeader
+         title="Security Operations Dashboard"
+-        subtitle={scope === "all" ? "Fleet-wide monitoring" : vessels.find((v) => v.id === scope)?.name}
++        subtitle={
++          scope === "all" ? "Fleet-wide monitoring" : vessels.find((v) => v.id === scope)?.name
++        }
+         actions={<SimBanner />}
+       />
+       <div className="grid min-h-0 flex-1 grid-cols-1 gap-2 overflow-auto p-2 xl:grid-cols-[1fr_25rem]">
+@@ -114,7 +116,12 @@ function Dashboard() {
+                       <span className="w-28">
+                         <ScoreBar score={v.securityScore} />
+                       </span>
+-                      <span className={cn("tabular w-8 text-right text-xs", stateColor[v.securityState])}>
++                      <span
++                        className={cn(
++                          "tabular w-8 text-right text-xs",
++                          stateColor[v.securityState],
++                        )}
++                      >
+                         {v.securityScore}
+                       </span>
+                       <span className="tabular w-14 text-right text-[10px] text-muted-foreground">
+@@ -130,7 +137,10 @@ function Dashboard() {
+               title="Active incidents"
+               meta={`${activeIncidents.length} open`}
+               actions={
+-                <Link to="/incidents" className="label-mono border border-border px-2 py-1 hover:bg-accent">
++                <Link
++                  to="/incidents"
++                  className="label-mono border border-border px-2 py-1 hover:bg-accent"
++                >
+                   Open queue
+                 </Link>
+               }
+@@ -165,7 +175,11 @@ function Dashboard() {
+ 
+           <Panel
+             title="Recent security events"
+-            meta={<span className="flex items-center gap-1"><AlertTriangle className="size-3" /> live stream</span>}
++            meta={
++              <span className="flex items-center gap-1">
++                <AlertTriangle className="size-3" /> live stream
++              </span>
++            }
+             className="min-h-72"
+             scroll
+           >
+diff --git a/src/routes/reports.tsx b/src/routes/reports.tsx
+index e116127..7c1ecca 100644
+--- a/src/routes/reports.tsx
++++ b/src/routes/reports.tsx
+@@ -18,7 +18,8 @@ export const Route = createFileRoute("/reports")({
+       { property: "og:title", content: "Security Reporting — SeaShield" },
+       {
+         property: "og:description",
+-        content: "Compliance-oriented reporting across events, uptime, violations and security scores.",
++        content:
++          "Compliance-oriented reporting across events, uptime, violations and security scores.",
+       },
+     ],
+   }),
+@@ -46,9 +47,7 @@ function ReportsView() {
+   }));
+   const max = Math.max(1, ...byCategory.map((b) => b.n));
+ 
+-  const camUptime = cameras.length
+-    ? cameras.reduce((a, c) => a + c.uptime, 0) / cameras.length
+-    : 0;
++  const camUptime = cameras.length ? cameras.reduce((a, c) => a + c.uptime, 0) / cameras.length : 0;
+   const senUptime = sensors.length ? sensors.reduce((a, c) => a + c.uptime, 0) / sensors.length : 0;
+ 
+   return (
+@@ -61,7 +60,11 @@ function ReportsView() {
+       <div className="min-h-0 flex-1 space-y-2 overflow-auto p-2">
+         <div className="grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-6">
+           <Metric label="Security events" value={events.length} sub="in current scope" />
+-          <Metric label="Incidents" value={incidents.length} sub={`${s.activeIncidents} still active`} />
++          <Metric
++            label="Incidents"
++            value={incidents.length}
++            sub={`${s.activeIncidents} still active`}
++          />
+           <Metric
+             label="Camera uptime"
+             value={`${camUptime.toFixed(1)}%`}
+@@ -77,7 +80,11 @@ function ReportsView() {
+             value={access.filter((a) => a.result !== "authorized").length}
+             tone="caution"
+           />
+-          <Metric label="Avg security score" value={s.avgScore} tone={s.avgScore >= 86 ? "secure" : "caution"}>
++          <Metric
++            label="Avg security score"
++            value={s.avgScore}
++            tone={s.avgScore >= 86 ? "secure" : "caution"}
++          >
+             <ScoreBar score={s.avgScore} />
+           </Metric>
+         </div>
+@@ -141,7 +148,12 @@ function ReportsView() {
+           </Panel>
+         </div>
+ 
+-        <Panel title="Camera and sensor availability" meta="device level" className="max-h-96" scroll>
++        <Panel
++          title="Camera and sensor availability"
++          meta="device level"
++          className="max-h-96"
++          scroll
++        >
+           <table className="w-full text-xs">
+             <thead className="sticky top-0 bg-panel-header">
+               <tr className="border-b border-border">
+diff --git a/src/routes/sensors.tsx b/src/routes/sensors.tsx
+index 0faa0e9..707b083 100644
+--- a/src/routes/sensors.tsx
++++ b/src/routes/sensors.tsx
+@@ -59,7 +59,11 @@ function SensorsView() {
+             value={rows.filter((r) => r.state === "offline").length}
+             tone={rows.some((r) => r.state === "offline") ? "warning" : "secure"}
+           />
+-          <Metric label="Active alarms" value={alarms.length} tone={alarms.length ? "critical" : "secure"} />
++          <Metric
++            label="Active alarms"
++            value={alarms.length}
++            tone={alarms.length ? "critical" : "secure"}
++          />
+         </div>
+ 
+         <div className="flex items-center gap-2">
+@@ -102,7 +106,10 @@ function SensorsView() {
+               {rows.map((s) => (
+                 <tr
+                   key={s.id}
+-                  className={cn("border-b border-border/50 hover:bg-accent/40", s.alarm && "bg-critical/10")}
++                  className={cn(
++                    "border-b border-border/50 hover:bg-accent/40",
++                    s.alarm && "bg-critical/10",
++                  )}
+                 >
+                   <td className="px-3 py-1.5">
+                     <StatusDot state={s.state} pulse={s.alarm} />
+@@ -110,11 +117,20 @@ function SensorsView() {
+                   <td className="label-mono px-3 py-1.5">{s.kind}</td>
+                   <td className="px-3 py-1.5">{s.location}</td>
+                   <td className="px-3 py-1.5 text-muted-foreground">{name(s.vesselId)}</td>
+-                  <td className={cn("tabular px-3 py-1.5", s.alarm ? "font-semibold text-critical" : "")}>
++                  <td
++                    className={cn(
++                      "tabular px-3 py-1.5",
++                      s.alarm ? "font-semibold text-critical" : "",
++                    )}
++                  >
+                     {s.reading}
+                   </td>
+-                  <td className={cn("tabular px-3 py-1.5", onlineText[s.state])}>{s.state.toUpperCase()}</td>
+-                  <td className="tabular px-3 py-1.5 text-muted-foreground">{s.uptime.toFixed(1)}%</td>
++                  <td className={cn("tabular px-3 py-1.5", onlineText[s.state])}>
++                    {s.state.toUpperCase()}
++                  </td>
++                  <td className="tabular px-3 py-1.5 text-muted-foreground">
++                    {s.uptime.toFixed(1)}%
++                  </td>
+                 </tr>
+               ))}
+             </tbody>
+diff --git a/src/routes/settings.tsx b/src/routes/settings.tsx
+index 55237e9..5565142 100644
+--- a/src/routes/settings.tsx
++++ b/src/routes/settings.tsx
+@@ -82,8 +82,8 @@ function SettingsView() {
+           <Panel title="Simulation">
+             <div className="space-y-3 p-3 text-xs">
+               <p className="text-muted-foreground">
+-                All vessels, cameras, sensors, network findings and security events in this build are
+-                simulated. Nothing connects to real vessels, cameras, networks or security
++                All vessels, cameras, sensors, network findings and security events in this build
++                are simulated. Nothing connects to real vessels, cameras, networks or security
+                 infrastructure, and event correlation is rule-based — not AI and not real threat
+                 detection.
+               </p>
+@@ -115,13 +115,14 @@ function SettingsView() {
+             <div className="space-y-2 p-3 text-xs text-muted-foreground">
+               <p>
+                 The interface is built as a full-screen, single-window operations console with no
+-                marketing surfaces, so it can be wrapped as a native desktop application (Electron or
+-                Tauri) for Windows and Linux workstations without UI changes.
++                marketing surfaces, so it can be wrapped as a native desktop application (Electron
++                or Tauri) for Windows and Linux workstations without UI changes.
+               </p>
+               <p>
+-                UI components read data only through the service layer (vesselService, cameraService,
+-                sensorService, eventService, incidentService, securityService), so switching from
+-                simulated data to the FastAPI backend does not require rewriting the interface.
++                UI components read data only through the service layer (vesselService,
++                cameraService, sensorService, eventService, incidentService, securityService), so
++                switching from simulated data to the FastAPI backend does not require rewriting the
++                interface.
+               </p>
+             </div>
+           </Panel>
+diff --git a/src/routes/vessels.$vesselId.tsx b/src/routes/vessels.$vesselId.tsx
+index 1387597..d7d2141 100644
+--- a/src/routes/vessels.$vesselId.tsx
++++ b/src/routes/vessels.$vesselId.tsx
+@@ -57,7 +57,10 @@ function VesselDetail() {
+         actions={
+           <div className="flex items-center gap-2">
+             <SimBanner />
+-            <Link to="/vessels" className="label-mono flex items-center gap-1 border border-border px-2 py-1 hover:bg-accent">
++            <Link
++              to="/vessels"
++              className="label-mono flex items-center gap-1 border border-border px-2 py-1 hover:bg-accent"
++            >
+               <ArrowLeft className="size-3" /> Vessels
+             </Link>
+           </div>
+@@ -68,15 +71,31 @@ function VesselDetail() {
+           <Metric
+             label="Security score"
+             value={vessel.securityScore}
+-            tone={vessel.securityState === "secure" ? "secure" : vessel.securityState === "critical" ? "critical" : "caution"}
++            tone={
++              vessel.securityState === "secure"
++                ? "secure"
++                : vessel.securityState === "critical"
++                  ? "critical"
++                  : "caution"
++            }
+             sub={vessel.securityState.toUpperCase()}
+           >
+             <ScoreBar score={vessel.securityScore} />
+           </Metric>
+           <SystemMetric label="Physical security" state={vessel.physical} />
+-          <Metric label="CCTV" value={`${camsOnline}/${cameras.length}`} tone={camsOnline === cameras.length ? "secure" : "caution"} sub="feeds online" />
++          <Metric
++            label="CCTV"
++            value={`${camsOnline}/${cameras.length}`}
++            tone={camsOnline === cameras.length ? "secure" : "caution"}
++            sub="feeds online"
++          />
+           <SystemMetric label="Access control" online={vessel.accessControl} />
+-          <Metric label="Sensors" value={`${sensorsOnline}/${sensors.length}`} tone={sensorsOnline === sensors.length ? "secure" : "caution"} sub="reporting" />
++          <Metric
++            label="Sensors"
++            value={`${sensorsOnline}/${sensors.length}`}
++            tone={sensorsOnline === sensors.length ? "secure" : "caution"}
++            sub="reporting"
++          />
+           <SystemMetric label="Cybersecurity" state={vessel.cyber} />
+           <SystemMetric label="Network" online={vessel.network} />
+           <SystemMetric label="GPS / AIS" online={vessel.gpsAis} sub={vessel.position} />
+@@ -95,13 +114,21 @@ function VesselDetail() {
+             <table className="w-full text-xs">
+               <tbody>
+                 {sensors.map((s) => (
+-                  <tr key={s.id} className={cn("border-b border-border/50", s.alarm && "bg-critical/10")}>
++                  <tr
++                    key={s.id}
++                    className={cn("border-b border-border/50", s.alarm && "bg-critical/10")}
++                  >
+                     <td className="px-3 py-1.5">
+                       <StatusDot state={s.state} pulse={s.alarm} />
+                     </td>
+                     <td className="label-mono px-2 py-1.5">{s.kind}</td>
+                     <td className="px-2 py-1.5 text-muted-foreground">{s.location}</td>
+-                    <td className={cn("tabular px-3 py-1.5 text-right", s.alarm ? "text-critical" : "")}>
++                    <td
++                      className={cn(
++                        "tabular px-3 py-1.5 text-right",
++                        s.alarm ? "text-critical" : "",
++                      )}
++                    >
+                       {s.reading}
+                     </td>
+                   </tr>
+@@ -145,7 +172,9 @@ function VesselDetail() {
+                       <SeverityTag severity={c.severity} />
+                     </td>
+                     <td className="px-2 py-1.5">{c.summary}</td>
+-                    <td className="tabular px-3 py-1.5 text-right text-muted-foreground">{c.host}</td>
++                    <td className="tabular px-3 py-1.5 text-right text-muted-foreground">
++                      {c.host}
++                    </td>
+                   </tr>
+                 ))}
+               </tbody>
+@@ -157,13 +186,22 @@ function VesselDetail() {
+           <Panel title="Incidents" meta={`${incidents.length} total`} className="max-h-72" scroll>
+             <ul>
+               {incidents.length === 0 ? (
+-                <li className="p-3 text-xs text-muted-foreground">No incidents recorded for this vessel.</li>
++                <li className="p-3 text-xs text-muted-foreground">
++                  No incidents recorded for this vessel.
++                </li>
+               ) : (
+                 incidents.map((i) => (
+-                  <li key={i.id} className="flex items-center gap-2 border-b border-border/50 px-3 py-2">
++                  <li
++                    key={i.id}
++                    className="flex items-center gap-2 border-b border-border/50 px-3 py-2"
++                  >
+                     <SeverityTag severity={i.severity} />
+                     <span className="tabular text-[10px] text-muted-foreground">{i.ref}</span>
+-                    <span className={cn("min-w-0 flex-1 truncate text-xs", severityText[i.severity])}>{i.title}</span>
++                    <span
++                      className={cn("min-w-0 flex-1 truncate text-xs", severityText[i.severity])}
++                    >
++                      {i.title}
++                    </span>
+                     <span className="label-mono">{i.status}</span>
+                   </li>
+                 ))
+@@ -171,10 +209,18 @@ function VesselDetail() {
+             </ul>
+           </Panel>
+ 
+-          <Panel title="Vessel event log" meta={`comms ${elapsed(vessel.lastComms, t)} ago`} className="max-h-72" scroll>
++          <Panel
++            title="Vessel event log"
++            meta={`comms ${elapsed(vessel.lastComms, t)} ago`}
++            className="max-h-72"
++            scroll
++          >
+             <ul>
+               {events.map((e) => (
+-                <li key={e.id} className="flex items-start gap-2 border-b border-border/50 px-3 py-1.5 text-xs">
++                <li
++                  key={e.id}
++                  className="flex items-start gap-2 border-b border-border/50 px-3 py-1.5 text-xs"
++                >
+                   <span className="tabular text-muted-foreground">{utcTime(e.ts)}</span>
+                   <SeverityTag severity={e.severity} />
+                   <span className="min-w-0 flex-1">
+@@ -207,7 +253,9 @@ function SystemMetric({
+   return (
+     <div className="flex min-w-0 flex-col justify-between gap-2 border border-border bg-panel px-3 py-2.5">
+       <div className="label-mono truncate">{label}</div>
+-      <div className={cn("tabular flex items-center gap-2 text-lg leading-none font-semibold", cls)}>
++      <div
++        className={cn("tabular flex items-center gap-2 text-lg leading-none font-semibold", cls)}
++      >
+         <StatusDot state={(state ?? online)!} />
+         {text}
+       </div>
+diff --git a/src/routes/vessels.index.tsx b/src/routes/vessels.index.tsx
+index d376639..a205216 100644
+--- a/src/routes/vessels.index.tsx
++++ b/src/routes/vessels.index.tsx
+@@ -1,7 +1,13 @@
+ import { createFileRoute, Link } from "@tanstack/react-router";
+ import { useSeaShield } from "@/lib/seashield/useSeaShield";
+ import { elapsed, onlineText, stateColor } from "@/lib/seashield/format";
+-import { PageHeader, Panel, ScoreBar, SimBanner, StatusDot } from "@/components/seashield/primitives";
++import {
++  PageHeader,
++  Panel,
++  ScoreBar,
++  SimBanner,
++  StatusDot,
++} from "@/components/seashield/primitives";
+ import { now } from "@/lib/seashield/store";
+ import { cn } from "@/lib/utils";
+ 
+@@ -30,7 +36,11 @@ function VesselsIndex() {
+ 
+   return (
+     <div className="flex min-h-0 flex-1 flex-col">
+-      <PageHeader title="Vessel Security" subtitle="Select a vessel for full system breakdown" actions={<SimBanner />} />
++      <PageHeader
++        title="Vessel Security"
++        subtitle="Select a vessel for full system breakdown"
++        actions={<SimBanner />}
++      />
+       <div className="grid min-h-0 flex-1 grid-cols-1 gap-2 overflow-auto p-2 md:grid-cols-2 xl:grid-cols-4">
+         {vessels.map((v) => (
+           <Link key={v.id} to="/vessels/$vesselId" params={{ vesselId: v.id }} className="block">
+@@ -43,11 +53,15 @@ function VesselsIndex() {
+                   </div>
+                   <StatusDot state={v.securityState} />
+                 </div>
+-                <div className="label-mono normal-case">{v.type} · {v.flag}</div>
++                <div className="label-mono normal-case">
++                  {v.type} · {v.flag}
++                </div>
+                 <div>
+                   <div className="flex items-baseline justify-between">
+                     <span className="label-mono">Security score</span>
+-                    <span className={cn("tabular text-lg font-semibold", stateColor[v.securityState])}>
++                    <span
++                      className={cn("tabular text-lg font-semibold", stateColor[v.securityState])}
++                    >
+                       {v.securityScore}
+                     </span>
+                   </div>
+diff --git a/src/styles.css b/src/styles.css
+index 9e6ece7..4165e88 100644
+--- a/src/styles.css
++++ b/src/styles.css
+@@ -11,8 +11,7 @@
+  */
+ 
+ @theme inline {
+-  --font-sans:
+-    "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
++  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+   --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
+ 
+   --radius-sm: calc(var(--radius) - 2px);
+-- 
+2.43.0
+

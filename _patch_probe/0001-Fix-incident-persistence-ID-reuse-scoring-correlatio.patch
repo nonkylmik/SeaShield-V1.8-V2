@@ -1,0 +1,620 @@
+From 8f07bb95d5866af4cd81133f36e61d0ed7af2093 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 24 Sep 2026 09:14:30 +0300
+Subject: [PATCH 1/8] Fix incident persistence, ID reuse, scoring, correlation
+ and scenario targeting
+
+- PATCH /incidents now updates the database record (was in-memory only, so
+  status reverted on refresh and returned 404 after a restart). Resolving an
+  incident resolves its linked events and recalculates vessel scores.
+- Incident IDs continue from the highest persisted ID; the engine is
+  rehydrated from the DB on startup, so a restart no longer reuses INC-0241
+  and merges new events into an unrelated old incident.
+- Vessel scores are recalculated from persisted open events on startup and
+  written back (API showed stale baseline, then dropped to 0 on first tick).
+- Simulation reset is non-destructive but closes all open events/incidents,
+  so scores actually return to baseline.
+- Correlation only evaluates rules containing the triggering event type, so
+  an open network intrusion no longer shadows the physical-breach rule.
+- navigation-anomaly / fire-emergency scenarios pointed at non-existent
+  vessels ("meridian", "northstar"); now atlantic-trader / northern-star.
+- New POST /api/v1/simulation/inject {vessel_id, event_type}. UI scenario
+  buttons now inject the event they name for the selected target vessel
+  (previously each button restarted a backend scenario at step 1 and ignored
+  the vessel selector).
+- /api/v1/simulation/next is async so its WebSocket broadcasts are delivered.
+- Regression tests for all of the above (7 of 8 fail on the previous code).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01F8gdxt3tGbrWATzufnb6wB
+---
+ backend/app/main.py                           |  88 +++++++++--
+ backend/db/repositories/event_repository.py   |  16 +-
+ .../db/repositories/incident_repository.py    |  31 ++++
+ backend/security_engine/event_correlation.py  |  11 +-
+ backend/security_engine/incident_manager.py   |  30 +++-
+ backend/simulation/scenario_manager.py        |   4 +-
+ backend/simulation/simulation_engine.py       |  12 +-
+ backend/tests/test_regressions.py             | 143 ++++++++++++++++++
+ src/lib/seashield/backend.ts                  |  30 +++-
+ src/lib/seashield/services.ts                 |   5 +-
+ 10 files changed, 335 insertions(+), 35 deletions(-)
+ create mode 100644 backend/tests/test_regressions.py
+
+diff --git a/backend/app/main.py b/backend/app/main.py
+index bc9389e..847ef23 100644
+--- a/backend/app/main.py
++++ b/backend/app/main.py
+@@ -10,8 +10,8 @@ from auth import SESSION_COOKIE, SESSION_TTL_SECONDS, authenticate, create_sessi
+ from db.database import Base, SessionLocal, engine as db_engine, get_db
+ from db.events import create_event, delete_event, from_record, get_event, list_events, load_events
+ from db.models import IncidentRecord, VesselRecord
+-from db.repositories.event_repository import create_event_record, list_event_records
+-from db.repositories.incident_repository import create_incident_record, get_incident_record, get_related_event_ids, list_incident_records
++from db.repositories.event_repository import create_event_record, list_event_records, resolve_all_open_events, set_event_status
++from db.repositories.incident_repository import close_open_incident_records, create_incident_record, get_incident_record, get_related_event_ids, list_incident_records, update_incident_record
+ from db.repositories.safety_repository import (
+     cancel_safety_round,
+     complete_safety_round,
+@@ -42,6 +42,11 @@ class ScenarioRequest(BaseModel):
+     scenario: str
+ 
+ 
++class InjectEventRequest(BaseModel):
++    vessel_id: str
++    event_type: str
++
++
+ app = FastAPI(title="SeaShield Security API", version="1.7.0", description="Simulation-only maritime security backend.")
+ app.add_middleware(CORSMiddleware, allow_origin_regex=r"https?://(localhost|127\.0\.0\.1):\d+", allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+ app.state.websocket_manager = ConnectionManager()
+@@ -98,14 +103,42 @@ def create_safety_event_record(db: Session, *, vessel_id: str, event_type: str,
+     return create_event(db, event, "safety-rounds")
+ 
+ 
++def incident_from_record(db: Session, record: IncidentRecord) -> Incident:
++    return Incident(
++        incident_id=record.incident_id,
++        vessel_id=record.vessel_id,
++        type=record.type,
++        title=record.title,
++        severity=record.severity,
++        status=record.status,
++        created_at=record.created_at,
++        updated_at=record.updated_at,
++        description=record.description,
++        related_event_ids=get_related_event_ids(db, record.incident_id),
++        assigned_operator=record.assigned_operator,
++        investigation_notes=record.investigation_notes,
++        recommended_action=record.recommended_action,
++    )
++
++
++def persist_vessel_scores(db: Session) -> None:
++    for vessel in engine.vessels:
++        upsert_vessel_record(db, vessel_id=vessel.id, name=vessel.name, imo=vessel.imo, base_score=vessel.base_score, score=vessel.score, status=vessel.status)
++
++
++def sync_engine_from_db(db: Session) -> None:
++    """Make the database the source of truth for events, incidents and scores."""
++    engine.events = load_events(db)
++    engine.incidents.load(incident_from_record(db, record) for record in list_incident_records(db))
++    engine.recalculate()
++    persist_vessel_scores(db)
++
++
+ @app.on_event("startup")
+ def initialize_database() -> None:
+     Base.metadata.create_all(bind=db_engine)
+     with SessionLocal() as db:
+-        for vessel in engine.vessels:
+-            upsert_vessel_record(db, vessel_id=vessel.id, name=vessel.name, imo=vessel.imo, base_score=vessel.base_score, score=vessel.score, status=vessel.status)
+-        engine.events = load_events(db)
+-        engine.recalculate()
++        sync_engine_from_db(db)
+ 
+ 
+ @app.get("/health")
+@@ -175,7 +208,10 @@ def get_events(vessel_id: str | None = None, db: Session = Depends(get_db)):
+ 
+ 
+ def persist_tick(db: Session):
+-    result = engine.tick()
++    return persist_result(db, engine.tick(), engine.scenarios.name)
++
++
++def persist_result(db: Session, result, scenario: str | None):
+     if result is None:
+         return None
+     create_event_record(
+@@ -191,7 +227,7 @@ def persist_tick(db: Session):
+         status=result.event.status.value,
+         title=result.event.title,
+         confidence=result.event.confidence,
+-        scenario=engine.scenarios.name,
++        scenario=scenario,
+         metadata=result.event.metadata,
+     )
+     for vessel in engine.vessels:
+@@ -273,11 +309,17 @@ def get_incident(incident_id: str, db: Session = Depends(get_db)):
+ 
+ @app.patch("/incidents/{incident_id}")
+ @app.patch("/api/v1/incidents/{incident_id}")
+-def update_incident(incident_id: str, update: IncidentUpdate):
+-    incident = engine.resolve_incident(incident_id, update.status, update.investigation_notes)
+-    if incident is None:
++async def update_incident(incident_id: str, update: IncidentUpdate, db: Session = Depends(get_db)):
++    record = update_incident_record(db, incident_id, status=update.status.value, investigation_notes=update.investigation_notes)
++    if record is None:
+         raise HTTPException(status_code=404, detail="Incident not found")
+-    return incident
++    related = get_related_event_ids(db, incident_id)
++    if update.status in {IncidentStatus.RESOLVED, IncidentStatus.FALSE_POSITIVE}:
++        set_event_status(db, related, "RESOLVED")
++    sync_engine_from_db(db)
++    payload = incident_response(record, related)
++    await broadcast_status_message("incident_updated", {"incident_id": incident_id, "status": record.status})
++    return payload
+ 
+ 
+ @app.get("/simulation/status")
+@@ -557,10 +599,23 @@ async def start_simulation(request: ScenarioRequest, db: Session = Depends(get_d
+ 
+ @app.post("/simulation/tick")
+ @app.post("/api/v1/simulation/next")
+-def next_simulation_step(db: Session = Depends(get_db)):
++async def next_simulation_step(db: Session = Depends(get_db)):
++    # async so the engine's WebSocket broadcasts run on the event loop
+     return persist_tick(db)
+ 
+ 
++@app.post("/api/v1/simulation/inject")
++async def inject_simulation_event(request: InjectEventRequest, db: Session = Depends(get_db)):
++    """Inject one simulated event of a given type for a given vessel."""
++    try:
++        result = engine.inject(request.vessel_id, request.event_type)
++    except KeyError as error:
++        raise HTTPException(status_code=404, detail="Vessel not found") from error
++    except ValueError as error:
++        raise HTTPException(status_code=400, detail=str(error)) from error
++    return persist_result(db, result, "manual-injection")
++
++
+ @app.post("/simulation/pause")
+ @app.post("/api/v1/simulation/pause")
+ async def simulation_pause():
+@@ -593,8 +648,11 @@ async def simulation_stop():
+ async def simulation_reset():
+     engine.reset()
+     with SessionLocal() as db:
+-        engine.events = load_events(db)
+-        engine.recalculate()
++        # Non-destructive reset: history is kept for audit, but every open simulated
++        # event and incident is closed so vessel scores return to their baseline.
++        resolve_all_open_events(db)
++        close_open_incident_records(db, status=IncidentStatus.RESOLVED.value, note="Closed by simulation reset.")
++        sync_engine_from_db(db)
+     await broadcast_status_message("simulation_status", {"scenario": engine.scenarios.name, "status": engine.scenarios.status.value, "index": engine.scenarios.index})
+     await broadcast_status_message("notification", {"title": "Simulation reset", "message": "The simulation has been reset.", "severity": "INFO"})
+     return simulation_status()
+diff --git a/backend/db/repositories/event_repository.py b/backend/db/repositories/event_repository.py
+index f3af894..b458b73 100644
+--- a/backend/db/repositories/event_repository.py
++++ b/backend/db/repositories/event_repository.py
+@@ -2,7 +2,7 @@ from __future__ import annotations
+ 
+ from datetime import datetime
+ 
+-from sqlalchemy import Select, delete, select
++from sqlalchemy import Select, delete, select, update
+ from sqlalchemy.orm import Session
+ 
+ from db.models import SecurityEventRecord
+@@ -88,3 +88,17 @@ def delete_event_record(db: Session, event_id: str) -> bool:
+     result = db.execute(delete(SecurityEventRecord).where(SecurityEventRecord.event_id == event_id))
+     db.commit()
+     return result.rowcount > 0
++
++
++def set_event_status(db: Session, event_ids: list[str], status: str) -> int:
++    if not event_ids:
++        return 0
++    result = db.execute(update(SecurityEventRecord).where(SecurityEventRecord.event_id.in_(event_ids)).values(status=status))
++    db.commit()
++    return result.rowcount
++
++
++def resolve_all_open_events(db: Session) -> int:
++    result = db.execute(update(SecurityEventRecord).where(SecurityEventRecord.status != "RESOLVED").values(status="RESOLVED"))
++    db.commit()
++    return result.rowcount
+diff --git a/backend/db/repositories/incident_repository.py b/backend/db/repositories/incident_repository.py
+index f850687..ad27352 100644
+--- a/backend/db/repositories/incident_repository.py
++++ b/backend/db/repositories/incident_repository.py
+@@ -69,3 +69,34 @@ def list_incident_records(db: Session, vessel_id: str | None = None) -> list[Inc
+ def get_related_event_ids(db: Session, incident_id: str) -> list[str]:
+     rows = db.scalars(select(IncidentEventLink.event_id).where(IncidentEventLink.incident_id == incident_id)).all()
+     return list(rows)
++
++
++def update_incident_record(
++    db: Session,
++    incident_id: str,
++    *,
++    status: str,
++    investigation_notes: str | None = None,
++) -> IncidentRecord | None:
++    record = get_incident_record(db, incident_id)
++    if record is None:
++        return None
++    record.status = status
++    if investigation_notes:
++        record.investigation_notes = investigation_notes
++    record.updated_at = datetime.now(timezone.utc)
++    db.commit()
++    db.refresh(record)
++    return record
++
++
++def close_open_incident_records(db: Session, *, status: str, note: str) -> int:
++    """Close every incident that is not already resolved or marked false positive."""
++    records = list(db.scalars(select(IncidentRecord).where(IncidentRecord.status.not_in(["RESOLVED", "FALSE POSITIVE"]))).all())
++    now = datetime.now(timezone.utc)
++    for record in records:
++        record.status = status
++        record.investigation_notes = f"{record.investigation_notes}\n{note}".strip()
++        record.updated_at = now
++    db.commit()
++    return len(records)
+diff --git a/backend/security_engine/event_correlation.py b/backend/security_engine/event_correlation.py
+index 16e66c4..e53c714 100644
+--- a/backend/security_engine/event_correlation.py
++++ b/backend/security_engine/event_correlation.py
+@@ -35,9 +35,16 @@ RULES = (
+ )
+ 
+ 
+-def correlate(events: Iterable[SecurityEvent], vessel_id: str) -> CorrelationResult | None:
++def correlate(events: Iterable[SecurityEvent], vessel_id: str, trigger_event_type: str | None = None) -> CorrelationResult | None:
++    """Return the first rule fully matched by unresolved events on the vessel.
++
++    When ``trigger_event_type`` is given, only rules that include that event type are
++    evaluated. This stops an older, still-open correlation (e.g. a network intrusion)
++    from shadowing every later rule on the same vessel.
++    """
+     relevant = [event for event in events if event.vessel_id == vessel_id and event.status != "RESOLVED"]
+-    for rule in RULES:
++    rules = RULES if trigger_event_type is None else tuple(rule for rule in RULES if trigger_event_type in rule.match)
++    for rule in rules:
+         matches = [event for event in relevant if event.event_type in rule.match]
+         if all(any(event.event_type == event_type for event in matches) for event_type in rule.match):
+             return CorrelationResult(f"corr-{uuid4().hex[:10]}", vessel_id, rule.title, rule.severity, tuple(event.event_id for event in matches), rule.description, datetime.now(timezone.utc), rule.systems)
+diff --git a/backend/security_engine/incident_manager.py b/backend/security_engine/incident_manager.py
+index 95a26cf..7a370ba 100644
+--- a/backend/security_engine/incident_manager.py
++++ b/backend/security_engine/incident_manager.py
+@@ -1,22 +1,46 @@
++import re
++from collections.abc import Iterable
+ from datetime import datetime, timezone
+ 
+ from models.events import SecurityEvent
+ from models.incidents import Incident, IncidentStatus
+ from security_engine.event_correlation import CorrelationResult
+ 
++FIRST_INCIDENT_NUMBER = 241
++_INCIDENT_NUMBER = re.compile(r"^INC-(\d+)$")
++CLOSED_STATUSES = {IncidentStatus.RESOLVED, IncidentStatus.FALSE_POSITIVE}
++
+ 
+ class IncidentManager:
+     """Owns in-memory incident creation, association, lifecycle, and history."""
+ 
+     def __init__(self) -> None:
+         self._incidents: list[Incident] = []
++        # Highest incident number ever issued. Kept across reset() so IDs are never reused
++        # while persisted incidents with the same ID still exist.
++        self._last_number = FIRST_INCIDENT_NUMBER - 1
++
++    def _observe(self, incident_id: str) -> None:
++        match = _INCIDENT_NUMBER.match(incident_id)
++        if match:
++            self._last_number = max(self._last_number, int(match.group(1)))
++
++    def _next_id(self) -> str:
++        self._last_number += 1
++        return f"INC-{self._last_number:04d}"
++
++    def load(self, incidents: Iterable[Incident]) -> None:
++        """Replace in-memory incidents with persisted ones (newest first)."""
++        self._incidents = sorted(incidents, key=lambda incident: incident.created_at, reverse=True)
++        for incident in self._incidents:
++            self._observe(incident.incident_id)
+ 
+     def create_from_correlation(self, result: CorrelationResult) -> Incident:
+-        existing = next((incident for incident in self._incidents if incident.vessel_id == result.vessel_id and incident.type == result.title and incident.status not in {IncidentStatus.RESOLVED, IncidentStatus.FALSE_POSITIVE}), None)
++        existing = next((incident for incident in self._incidents if incident.vessel_id == result.vessel_id and incident.type == result.title and incident.status not in CLOSED_STATUSES), None)
+         if existing:
+             existing.related_event_ids = list(dict.fromkeys([*existing.related_event_ids, *result.related_event_ids]))
+             return existing
+-        incident = Incident(incident_id=f"INC-{241 + len(self._incidents):04d}", vessel_id=result.vessel_id, type=result.title, title=result.title, severity=result.severity, description=result.description, related_event_ids=list(result.related_event_ids), affected_systems=list(result.affected_systems))
++        incident = Incident(incident_id=self._next_id(), vessel_id=result.vessel_id, type=result.title, title=result.title, severity=result.severity, description=result.description, related_event_ids=list(result.related_event_ids), affected_systems=list(result.affected_systems))
+         self._incidents.insert(0, incident)
+         return incident
+ 
+@@ -24,7 +48,7 @@ class IncidentManager:
+         return list(self._incidents)
+ 
+     def get_active(self) -> list[Incident]:
+-        return [incident for incident in self._incidents if incident.status not in {IncidentStatus.RESOLVED, IncidentStatus.FALSE_POSITIVE}]
++        return [incident for incident in self._incidents if incident.status not in CLOSED_STATUSES]
+ 
+     def get(self, incident_id: str) -> Incident | None:
+         return next((incident for incident in self._incidents if incident.incident_id == incident_id), None)
+diff --git a/backend/simulation/scenario_manager.py b/backend/simulation/scenario_manager.py
+index 4f0d429..4f1e821 100644
+--- a/backend/simulation/scenario_manager.py
++++ b/backend/simulation/scenario_manager.py
+@@ -40,12 +40,12 @@ SCENARIOS = {
+         ScenarioStep("UNAUTHORIZED_ACCESS", EventCategory.PHYSICAL, Severity.HIGH, "Access Control", "Unauthorized access in a restricted area."),
+         ScenarioStep("CAMERA_OFFLINE", EventCategory.PHYSICAL, Severity.HIGH, "CCTV", "Nearby camera stopped responding."),
+     )),
+-    "navigation-anomaly": Scenario("Navigation Anomaly Simulation", "meridian", (
++    "navigation-anomaly": Scenario("Navigation Anomaly Simulation", "atlantic-trader", (
+         ScenarioStep("GPS_ANOMALY", EventCategory.VESSEL_SYSTEM, Severity.MEDIUM, "GPS", "GPS position variance exceeds tolerance."),
+         ScenarioStep("AIS_ANOMALY", EventCategory.VESSEL_SYSTEM, Severity.MEDIUM, "AIS", "AIS report is inconsistent."),
+         ScenarioStep("COMMUNICATION_INSTABILITY", EventCategory.VESSEL_SYSTEM, Severity.HIGH, "Edge Gateway", "Communication instability detected."),
+     )),
+-    "fire-emergency": Scenario("Fire Emergency Simulation", "northstar", (
++    "fire-emergency": Scenario("Fire Emergency Simulation", "northern-star", (
+         ScenarioStep("SMOKE_DETECTED", EventCategory.ENVIRONMENTAL, Severity.HIGH, "Smoke Sensor", "Smoke detected in a simulated zone."),
+         ScenarioStep("FIRE_ALARM", EventCategory.ENVIRONMENTAL, Severity.CRITICAL, "Fire Panel", "Fire alarm activated in a simulated zone."),
+         ScenarioStep("TEMPERATURE_HIGH", EventCategory.ENVIRONMENTAL, Severity.HIGH, "Temperature Sensor", "Temperature exceeds simulated threshold."),
+diff --git a/backend/simulation/simulation_engine.py b/backend/simulation/simulation_engine.py
+index d292935..4a252dd 100644
+--- a/backend/simulation/simulation_engine.py
++++ b/backend/simulation/simulation_engine.py
+@@ -52,6 +52,16 @@ class SimulationEngine:
+         if step is None or scenario is None:
+             return None
+         event = SecurityEvent(event_id=self.generator.create(scenario.vessel_id, step.event_type).event_id, timestamp=datetime.now(timezone.utc), vessel_id=scenario.vessel_id, event_type=step.event_type, category=step.category, severity=step.severity, source=step.source, description=step.description)
++        return self._process(event)
++
++    def inject(self, vessel_id: str, event_type: str) -> TickResult:
++        """Inject a single simulated event of the given type for a specific vessel."""
++        if not any(vessel.id == vessel_id for vessel in self.vessels):
++            raise KeyError(vessel_id)
++        event = self.generator.create(vessel_id, event_type)  # ValueError for unknown types
++        return self._process(event)
++
++    def _process(self, event: SecurityEvent) -> TickResult:
+         self.events.insert(0, event)
+         self._emit("security_event", {"event": event.model_dump(mode="json")})
+         if event.event_type == "CAMERA_OFFLINE":
+@@ -59,7 +69,7 @@ class SimulationEngine:
+                 if camera.vessel_id == event.vessel_id:
+                     camera.online = False
+                     camera.recording = False
+-        result = correlate(self.events, event.vessel_id)
++        result = correlate(self.events, event.vessel_id, event.event_type)
+         if result:
+             incident = self.incidents.create_from_correlation(result)
+             self._emit("incident_created", {"incident": incident.model_dump(mode="json")})
+diff --git a/backend/tests/test_regressions.py b/backend/tests/test_regressions.py
+new file mode 100644
+index 0000000..9461657
+--- /dev/null
++++ b/backend/tests/test_regressions.py
+@@ -0,0 +1,143 @@
++"""Regression tests for incident persistence, ID reuse, scoring, correlation and scenario targeting."""
++
++import pytest
++from fastapi.testclient import TestClient
++from sqlalchemy import create_engine
++from sqlalchemy.orm import sessionmaker
++
++import app.main as main
++from db.database import Base, get_db
++from simulation.scenario_manager import SCENARIOS
++from simulation.simulation_engine import SimulationEngine
++
++
++@pytest.fixture()
++def sessions(tmp_path):
++    database_engine = create_engine(f"sqlite:///{tmp_path / 'regressions.db'}", connect_args={"check_same_thread": False})
++    Base.metadata.create_all(database_engine)
++    yield sessionmaker(bind=database_engine, autoflush=False, expire_on_commit=False)
++    Base.metadata.drop_all(database_engine)
++
++
++def boot(sessions, monkeypatch) -> TestClient:
++    """Start a fresh app instance (fresh engine) against the given database — simulates a restart."""
++    engine = SimulationEngine(seed=7)
++    engine.set_broadcaster(main.app.state.websocket_manager.broadcast)
++    monkeypatch.setattr(main, "engine", engine)
++    monkeypatch.setattr(main, "SessionLocal", sessions)
++
++    def override_db():
++        with sessions() as session:
++            yield session
++
++    main.app.dependency_overrides[get_db] = override_db
++    return TestClient(main.app)
++
++
++@pytest.fixture(autouse=True)
++def clear_overrides():
++    yield
++    main.app.dependency_overrides.clear()
++
++
++def run_cyber_intrusion(client: TestClient) -> None:
++    client.post("/api/v1/simulation/scenario/cyber-intrusion/start")
++    for _ in range(4):
++        client.post("/api/v1/simulation/next")
++
++
++def incidents(client: TestClient) -> list[dict]:
++    return client.get("/api/v1/incidents").json()
++
++
++def vessel(client: TestClient, vessel_id: str) -> dict:
++    return next(item for item in client.get("/api/v1/vessels").json() if item["id"] == vessel_id)
++
++
++def test_incident_status_update_is_persisted_and_survives_restart(sessions, monkeypatch):
++    with boot(sessions, monkeypatch) as client:
++        run_cyber_intrusion(client)
++        [incident] = incidents(client)
++        assert vessel(client, "calypso")["status"] != "SECURE"
++        response = client.patch(f"/api/v1/incidents/{incident['incident_id']}", json={"status": "RESOLVED", "investigation_notes": "Contained."})
++        assert response.status_code == 200
++        assert incidents(client)[0]["status"] == "RESOLVED"
++        assert incidents(client)[0]["investigation_notes"] == "Contained."
++        # Resolving the incident resolves its linked events, so the score recovers; only the
++        # unrelated FIREWALL_BLOCK (MEDIUM, -5) from the scenario stays open.
++        assert vessel(client, "calypso")["score"] == 92 - 5
++
++    with boot(sessions, monkeypatch) as client:  # restart
++        assert client.patch(f"/api/v1/incidents/{incident['incident_id']}", json={"status": "INVESTIGATING"}).status_code == 200
++        assert incidents(client)[0]["status"] == "INVESTIGATING"
++
++
++def test_incident_ids_are_not_reused_after_restart(sessions, monkeypatch):
++    with boot(sessions, monkeypatch) as client:
++        run_cyber_intrusion(client)
++        first = incidents(client)[0]["incident_id"]
++
++    with boot(sessions, monkeypatch) as client:  # restart
++        client.post("/api/v1/simulation/scenario/physical-breach/start")
++        client.post("/api/v1/simulation/next")
++        rows = incidents(client)
++        assert len(rows) == 2
++        assert len({row["incident_id"] for row in rows}) == 2
++        physical = next(row for row in rows if row["type"] == "Potential Physical Security Breach")
++        assert physical["incident_id"] != first
++
++
++def test_open_incident_is_rehydrated_after_restart_instead_of_duplicated(sessions, monkeypatch):
++    with boot(sessions, monkeypatch) as client:
++        run_cyber_intrusion(client)
++
++    with boot(sessions, monkeypatch) as client:  # restart, same intrusion continues
++        client.post("/api/v1/simulation/inject", json={"vessel_id": "calypso", "event_type": "SUSPICIOUS_TRAFFIC"})
++        rows = incidents(client)
++        assert len(rows) == 1
++        assert rows[0]["type"] == "Potential Network Intrusion"
++
++
++def test_scores_reflect_open_events_at_startup(sessions, monkeypatch):
++    with boot(sessions, monkeypatch) as client:
++        run_cyber_intrusion(client)
++        expected = vessel(client, "calypso")["score"]
++        assert expected < 92
++
++    with boot(sessions, monkeypatch) as client:  # restart: score must not snap back to baseline
++        assert vessel(client, "calypso")["score"] == expected
++
++
++def test_reset_restores_baseline_scores_and_closes_incidents(sessions, monkeypatch):
++    with boot(sessions, monkeypatch) as client:
++        run_cyber_intrusion(client)
++        assert client.post("/api/v1/simulation/reset").status_code == 200
++        assert vessel(client, "calypso")["score"] == 92
++        assert vessel(client, "calypso")["status"] == "SECURE"
++        assert all(row["status"] == "RESOLVED" for row in incidents(client))
++        # history is kept for audit
++        assert client.get("/api/security-events?limit=50").json()
++
++
++def test_new_rule_is_not_shadowed_by_open_intrusion(sessions, monkeypatch):
++    with boot(sessions, monkeypatch) as client:
++        run_cyber_intrusion(client)
++        client.post("/api/v1/simulation/scenario/physical-breach/start")
++        client.post("/api/v1/simulation/next")
++        types = {row["type"] for row in incidents(client)}
++        assert types == {"Potential Network Intrusion", "Potential Physical Security Breach"}
++
++
++def test_scenarios_target_existing_vessels():
++    vessel_ids = {item.id for item in SimulationEngine().vessels}
++    assert {scenario.vessel_id for scenario in SCENARIOS.values()} <= vessel_ids
++
++
++def test_inject_uses_requested_vessel_and_event_type(sessions, monkeypatch):
++    with boot(sessions, monkeypatch) as client:
++        response = client.post("/api/v1/simulation/inject", json={"vessel_id": "baltic-guardian", "event_type": "CAMERA_OFFLINE"})
++        assert response.status_code == 200
++        event = response.json()["event"]
++        assert (event["vessel_id"], event["event_type"]) == ("baltic-guardian", "CAMERA_OFFLINE")
++        assert client.post("/api/v1/simulation/inject", json={"vessel_id": "meridian", "event_type": "CAMERA_OFFLINE"}).status_code == 404
++        assert client.post("/api/v1/simulation/inject", json={"vessel_id": "calypso", "event_type": "NOPE"}).status_code == 400
+diff --git a/src/lib/seashield/backend.ts b/src/lib/seashield/backend.ts
+index b33ffb9..44d8b82 100644
+--- a/src/lib/seashield/backend.ts
++++ b/src/lib/seashield/backend.ts
+@@ -1,7 +1,7 @@
+ import { hydrateFromBackend } from "./store";
+ import type { Camera, Incident, SecurityEvent, Severity, Vessel } from "./types";
+ 
+-const API_URL = (import.meta.env.VITE_API_URL ?? "http://localhost:8000").replace(/\/$/, "");
++const API_URL = (import.meta.env["VITE_API_URL"] ?? "http://localhost:8000").replace(/\/$/, "");
+ const WS_URL = API_URL.replace(/^http/, "ws") + "/ws/security";
+ 
+ type ApiVessel = { id: string; name: string; imo: string; score: number; status: string; last_communication?: string };
+@@ -46,13 +46,29 @@ export async function refreshSeaShieldBackend() {
+     incidents: incidents.map((i) => ({ id: i.incident_id, ref: i.incident_id, title: i.title, vesselId: i.vessel_id, system: i.type, severity: severity(i.severity), status: incidentStatus(i.status), assignee: i.assigned_operator ?? "Security Operator", openedAt: dateMs(i.created_at), updatedAt: dateMs(i.updated_at), eventIds: i.related_event_ids ?? [], notes: i.investigation_notes ? [{ id: `${i.incident_id}-note`, ts: dateMs(i.updated_at), author: i.assigned_operator ?? "Security Operator", body: i.investigation_notes }] : [], timeline: [{ id: `${i.incident_id}-opened`, ts: dateMs(i.created_at), text: "Incident opened by the V1.8 correlation engine." }] })),
+   });
+ }
+-const scenarioMap: Record<string, string> = { "camera-failure": "physical-breach", "unauthorized-access": "physical-breach", "unknown-device": "cyber-intrusion", "brute-force": "cyber-intrusion", "suspicious-traffic": "cyber-intrusion", "firewall-block": "cyber-intrusion", "gps-anomaly": "navigation-anomaly", "sensor-failure": "fire-emergency", "fire-alarm": "fire-emergency" };
+-export async function runBackendScenario(uiScenario: string) {
+-  const scenario = scenarioMap[uiScenario];
+-  if (!scenario) throw new Error(`No V1.8 scenario is mapped to ${uiScenario}.`);
+-  await request(`/api/v1/simulation/scenario/${scenario}/start`, { method: "POST" });
++/** Each UI scenario injects exactly one V1.8 event of the matching type for the chosen vessel. */
++const scenarioEventType: Record<string, string> = {
++  "camera-failure": "CAMERA_OFFLINE",
++  "unauthorized-access": "UNAUTHORIZED_ACCESS",
++  "unknown-device": "UNKNOWN_DEVICE",
++  "brute-force": "FAILED_AUTHENTICATION",
++  "suspicious-traffic": "SUSPICIOUS_TRAFFIC",
++  "firewall-block": "FIREWALL_BLOCK",
++  "gps-anomaly": "GPS_ANOMALY",
++  "sensor-failure": "SENSOR_FAILURE",
++  "fire-alarm": "FIRE_ALARM",
++};
++type InjectResult = { event: ApiEvent; correlation: { title: string } | null } | null;
++export async function runBackendScenario(uiScenario: string, vesselId: string) {
++  const eventType = scenarioEventType[uiScenario];
++  if (!eventType) throw new Error(`No V1.8 event type is mapped to ${uiScenario}.`);
++  const result = await request<InjectResult>("/api/v1/simulation/inject", {
++    method: "POST",
++    body: JSON.stringify({ vessel_id: vesselId, event_type: eventType }),
++  });
+   await refreshSeaShieldBackend();
+-  return `V1.8 ${scenario.replaceAll("-", " ")} scenario advanced.`;
++  const label = eventType.replaceAll("_", " ").toLowerCase();
++  return result?.correlation ? `${label} injected · correlated: ${result.correlation.title}` : `${label} injected`;
+ }
+ export async function resetBackendSimulation() { await request("/api/v1/simulation/reset", { method: "POST" }); await refreshSeaShieldBackend(); }
+ export async function updateBackendIncident(id: string, status: Incident["status"], notes = "") {
+diff --git a/src/lib/seashield/services.ts b/src/lib/seashield/services.ts
+index 0416ec4..1030869 100644
+--- a/src/lib/seashield/services.ts
++++ b/src/lib/seashield/services.ts
+@@ -114,10 +114,7 @@ export const securityService = {
+ 
+ export const simulationService = {
+   scenarios: store.SCENARIOS,
+-  trigger: async (id: store.ScenarioId, vesselId: string) => {
+-    void vesselId;
+-    return runBackendScenario(id);
+-  },
++  trigger: async (id: store.ScenarioId, vesselId: string) => runBackendScenario(id, vesselId),
+   log: () => store.getState().simLog,
+   reset: async () => resetBackendSimulation(),
+ };
+-- 
+2.43.0
+

@@ -26,3 +26,8 @@ class SecurityEventResponse(SecurityEventCreate):
     model_config = ConfigDict(from_attributes=True)
     id: int
     created_at: datetime
+    acknowledged: bool = False
+
+
+class EventAcknowledge(BaseModel):
+    acknowledged_by: str = "Operator"

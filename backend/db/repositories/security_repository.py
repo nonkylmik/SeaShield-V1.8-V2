@@ -36,3 +36,8 @@ def list_security_score_history(db: Session, vessel_id: str | None = None) -> li
         query = query.where(SecurityScoreHistory.vessel_id == vessel_id)
     query = query.order_by(SecurityScoreHistory.timestamp.desc())
     return list(db.scalars(query).all())
+
+
+def latest_security_score(db: Session, vessel_id: str) -> SecurityScoreHistory | None:
+    query = select(SecurityScoreHistory).where(SecurityScoreHistory.vessel_id == vessel_id).order_by(SecurityScoreHistory.timestamp.desc(), SecurityScoreHistory.id.desc()).limit(1)
+    return db.scalar(query)

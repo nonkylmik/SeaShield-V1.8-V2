@@ -30,3 +30,7 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Local databases (created on first backend start)
+*.db
+*.db-journal

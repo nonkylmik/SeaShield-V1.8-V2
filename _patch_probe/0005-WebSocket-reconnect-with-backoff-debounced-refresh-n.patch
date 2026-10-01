@@ -1,0 +1,151 @@
+From 057449d903b0923c8796a02144fc620dae12c2f8 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 24 Sep 2026 09:39:25 +0300
+Subject: [PATCH 5/8] WebSocket: reconnect with backoff, debounced refresh, no
+ stale overwrites
+
+Frontend (src/lib/seashield/backend.ts)
+- The socket reconnects with exponential backoff (1 s .. 30 s) and resyncs on
+  reconnect; previously live updates stopped for good after a backend restart
+  or network drop until the page was reloaded. The console shows "degraded"
+  while disconnected.
+- Bursts of WebSocket messages are coalesced into one refresh (250 ms
+  debounce); one scenario used to trigger ~30 parallel API requests.
+- Only the most recently started refresh may write to the store, so an older,
+  slower response can no longer overwrite newer data.
+- Connection is reference-counted, so mount/unmount (e.g. React StrictMode)
+  cannot leave the app without a socket.
+
+Backend
+- On WebSocketDisconnect the client is only removed; closing an already
+  closed socket raised "Unexpected ASGI message 'websocket.close'" on every
+  browser disconnect.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01F8gdxt3tGbrWATzufnb6wB
+---
+ backend/app/main.py          |  3 +-
+ backend/websocket_manager.py |  8 ++++-
+ src/lib/seashield/backend.ts | 62 ++++++++++++++++++++++++++++++++----
+ 3 files changed, 64 insertions(+), 9 deletions(-)
+
+diff --git a/backend/app/main.py b/backend/app/main.py
+index b2297b0..ff98aeb 100644
+--- a/backend/app/main.py
++++ b/backend/app/main.py
+@@ -683,7 +683,8 @@ async def websocket_security(websocket: WebSocket):
+         while True:
+             await websocket.receive_text()
+     except WebSocketDisconnect:
+-        await manager.disconnect(websocket)
++        # client already closed the connection; closing again raises in Starlette
++        manager.remove_client(websocket)
+     except Exception:
+         await manager.disconnect(websocket)
+ 
+diff --git a/backend/websocket_manager.py b/backend/websocket_manager.py
+index 4e6aa90..74dde91 100644
+--- a/backend/websocket_manager.py
++++ b/backend/websocket_manager.py
+@@ -26,9 +26,15 @@ class ConnectionManager:
+         self.add_client(websocket)
+ 
+     async def disconnect(self, websocket: WebSocket) -> None:
++        """Forget the client and close the socket if both sides are still connected."""
+         self.remove_client(websocket)
+-        if websocket.application_state != WebSocketState.DISCONNECTED:
++        if websocket.client_state == WebSocketState.DISCONNECTED or websocket.application_state == WebSocketState.DISCONNECTED:
++            return
++        try:
+             await websocket.close()
++        except RuntimeError:
++            # close raced with the client going away; nothing left to do
++            pass
+ 
+     async def broadcast(self, message: dict[str, Any]) -> None:
+         dead_clients: list[WebSocket] = []
+diff --git a/src/lib/seashield/backend.ts b/src/lib/seashield/backend.ts
+index 781fe7e..a558221 100644
+--- a/src/lib/seashield/backend.ts
++++ b/src/lib/seashield/backend.ts
+@@ -46,8 +46,13 @@ function mapIncident(i: ApiIncident): Incident {
+   return { id: i.incident_id, ref: i.incident_id, title: i.title, vesselId: i.vessel_id, system: i.type, severity: severity(i.severity), status: incidentStatus(i.status), assignee: i.assigned_operator ?? "Security Operator", openedAt: dateMs(i.created_at), updatedAt: dateMs(i.updated_at), eventIds: i.related_event_ids ?? [], notes, timeline };
+ }
+ 
++let refreshSequence = 0;
+ export async function refreshSeaShieldBackend() {
++  // Only the most recently started refresh may write to the store, so a slow
++  // response can never overwrite newer data.
++  const sequence = ++refreshSequence;
+   const [health, vessels, cameras, events, incidents] = await Promise.all([request<{ status: string }>("/health"), request<ApiVessel[]>("/api/v1/vessels"), request<ApiCamera[]>("/api/v1/cameras"), request<ApiEvent[]>("/api/security-events?limit=100"), request<ApiIncident[]>("/api/v1/incidents")]);
++  if (sequence !== refreshSequence) return;
+   hydrateFromBackend({
+     health: health.status,
+     vessels: vessels.map((v) => ({ id: v.id, name: v.name, imo: v.imo, score: v.score, state: stateFor(v.score), lastComms: dateMs(v.last_communication) })),
+@@ -109,13 +114,56 @@ export async function acknowledgeBackendEvent(id: string, acknowledgedBy: string
+   await request(`/api/security-events/${encodeURIComponent(id)}/acknowledge`, { method: "POST", body: JSON.stringify({ acknowledged_by: acknowledgedBy }) });
+   await refreshSeaShieldBackend();
+ }
++/* ------------------------------------------------------------------ */
++/* Live updates                                                        */
++/* ------------------------------------------------------------------ */
++
++const REFRESH_DEBOUNCE_MS = 250;
++const MAX_RECONNECT_DELAY_MS = 30_000;
+ let socket: WebSocket | undefined;
++let consumers = 0;
++let reconnectAttempt = 0;
++let reconnectTimer: number | undefined;
++let refreshTimer: number | undefined;
++
++/** Coalesce bursts of WebSocket messages (one scenario emits several) into one refresh. */
++function scheduleRefresh(delay = REFRESH_DEBOUNCE_MS) {
++  window.clearTimeout(refreshTimer);
++  refreshTimer = window.setTimeout(() => void refreshSeaShieldBackend().catch(() => hydrateFromBackend({ health: "degraded" })), delay);
++}
++
++function openSocket() {
++  if (socket || consumers === 0) return;
++  const ws = new WebSocket(WS_URL);
++  socket = ws;
++  ws.onopen = () => {
++    reconnectAttempt = 0;
++    ws.send("seashield-ui");
++    scheduleRefresh(0); // resync anything missed while disconnected
++  };
++  ws.onmessage = () => scheduleRefresh();
++  ws.onerror = () => ws.close();
++  ws.onclose = () => {
++    if (socket === ws) socket = undefined;
++    if (consumers === 0) return;
++    hydrateFromBackend({ health: "degraded" });
++    const delay = Math.min(MAX_RECONNECT_DELAY_MS, 1000 * 2 ** reconnectAttempt);
++    reconnectAttempt += 1;
++    reconnectTimer = window.setTimeout(openSocket, delay);
++  };
++}
++
+ export function connectSeaShieldBackend() {
+-  void refreshSeaShieldBackend().catch(() => hydrateFromBackend({ health: "degraded" }));
+-  if (socket) return () => socket?.close();
+-  socket = new WebSocket(WS_URL);
+-  socket.onopen = () => socket?.send("seashield-ui");
+-  socket.onmessage = () => void refreshSeaShieldBackend().catch(() => undefined);
+-  socket.onclose = () => { socket = undefined; };
+-  return () => socket?.close();
++  consumers += 1;
++  scheduleRefresh(0);
++  openSocket();
++  return () => {
++    consumers = Math.max(0, consumers - 1);
++    if (consumers > 0) return;
++    window.clearTimeout(reconnectTimer);
++    window.clearTimeout(refreshTimer);
++    const ws = socket;
++    socket = undefined;
++    ws?.close();
++  };
+ }
+-- 
+2.43.0
+

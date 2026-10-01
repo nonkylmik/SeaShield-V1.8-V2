@@ -1,0 +1,195 @@
+From 105ae02004f3beeb087cdf832cf1297d476fee92 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 24 Sep 2026 09:40:52 +0300
+Subject: [PATCH 6/8] Fix vessel fixture mapping, UTC timestamps, fps display;
+ lean score history
+
+Frontend
+- V2-only fixtures (sensors, access log, cyber findings) are attached to
+  backend vessels by a stable slot (vessels sorted by ID) instead of the API
+  list position, and only vessel identity/score fields are taken from the
+  backend (no stray "score"/"state" keys on Vessel).
+- Timestamps without an offset (SQLite) are parsed as UTC. Browsers treated
+  them as local time, so in Tallinn (UTC+3) every event/incident time was
+  shifted by three hours.
+- Camera fps no longer shows "24.900000000000006".
+
+Backend
+- Score history is appended only when a vessel's score changes, and the
+  previous score is read with a single LIMIT 1 query instead of loading the
+  whole history for every vessel on every simulation step.
+
+Tests: tests/test_score_history.py.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01F8gdxt3tGbrWATzufnb6wB
+---
+ backend/app/main.py                           |  6 ++-
+ .../db/repositories/security_repository.py    |  5 +++
+ backend/tests/test_score_history.py           | 35 ++++++++++++++++
+ src/lib/seashield/backend.ts                  |  8 +++-
+ src/lib/seashield/store.ts                    | 42 +++++++++++++------
+ 5 files changed, 81 insertions(+), 15 deletions(-)
+ create mode 100644 backend/tests/test_score_history.py
+
+diff --git a/backend/app/main.py b/backend/app/main.py
+index ff98aeb..efc7da0 100644
+--- a/backend/app/main.py
++++ b/backend/app/main.py
+@@ -42,7 +42,7 @@ from db.repositories.safety_repository import (
+     update_safety_checkpoint,
+     update_safety_finding,
+ )
+-from db.repositories.security_repository import append_security_score, list_security_score_history
++from db.repositories.security_repository import append_security_score, latest_security_score
+ from db.repositories.vessel_repository import get_vessel_record, list_vessel_records, to_vessel_model, upsert_vessel_record
+ from models.events import EventCategory, SecurityEvent, Severity
+ from models.incidents import Incident, IncidentCreate, IncidentNoteCreate, IncidentStatus, IncidentUpdate
+@@ -264,7 +264,9 @@ def persist_result(db: Session, result, scenario: str | None):
+     )
+     for vessel in engine.vessels:
+         upsert_vessel_record(db, vessel_id=vessel.id, name=vessel.name, imo=vessel.imo, base_score=vessel.base_score, score=vessel.score, status=vessel.status)
+-        append_security_score(db, vessel_id=vessel.id, score=vessel.score, previous_score=next((entry.score for entry in list_security_score_history(db, vessel_id=vessel.id)[:1]), None), reason="simulation_update")
++        latest = latest_security_score(db, vessel.id)
++        if latest is None or latest.score != vessel.score:  # history only records changes
++            append_security_score(db, vessel_id=vessel.id, score=vessel.score, previous_score=latest.score if latest else None, reason="simulation_update")
+     if result.correlation:
+         incident = engine.incidents.create_from_correlation(result.correlation)
+         is_new = get_incident_record(db, incident.incident_id) is None
+diff --git a/backend/db/repositories/security_repository.py b/backend/db/repositories/security_repository.py
+index e09e3d3..c3b1a7a 100644
+--- a/backend/db/repositories/security_repository.py
++++ b/backend/db/repositories/security_repository.py
+@@ -36,3 +36,8 @@ def list_security_score_history(db: Session, vessel_id: str | None = None) -> li
+         query = query.where(SecurityScoreHistory.vessel_id == vessel_id)
+     query = query.order_by(SecurityScoreHistory.timestamp.desc())
+     return list(db.scalars(query).all())
++
++
++def latest_security_score(db: Session, vessel_id: str) -> SecurityScoreHistory | None:
++    query = select(SecurityScoreHistory).where(SecurityScoreHistory.vessel_id == vessel_id).order_by(SecurityScoreHistory.timestamp.desc(), SecurityScoreHistory.id.desc()).limit(1)
++    return db.scalar(query)
+diff --git a/backend/tests/test_score_history.py b/backend/tests/test_score_history.py
+new file mode 100644
+index 0000000..e57be4a
+--- /dev/null
++++ b/backend/tests/test_score_history.py
+@@ -0,0 +1,35 @@
++"""Security score history only records actual changes."""
++
++from fastapi.testclient import TestClient
++from sqlalchemy import create_engine
++from sqlalchemy.orm import sessionmaker
++
++import app.main as main
++from db.database import Base, get_db
++from db.repositories.security_repository import list_security_score_history
++from simulation.simulation_engine import SimulationEngine
++
++
++def test_history_is_appended_only_when_the_score_changes(tmp_path, monkeypatch):
++    database_engine = create_engine(f"sqlite:///{tmp_path / 'history.db'}", connect_args={"check_same_thread": False})
++    Base.metadata.create_all(database_engine)
++    sessions = sessionmaker(bind=database_engine, autoflush=False, expire_on_commit=False)
++    monkeypatch.setattr(main, "engine", SimulationEngine(seed=7))
++    monkeypatch.setattr(main, "SessionLocal", sessions)
++
++    def override_db():
++        with sessions() as session:
++            yield session
++
++    main.app.dependency_overrides[get_db] = override_db
++    try:
++        with TestClient(main.app) as client:
++            client.post("/api/v1/simulation/inject", json={"vessel_id": "calypso", "event_type": "FIREWALL_BLOCK"})
++            client.post("/api/v1/simulation/inject", json={"vessel_id": "calypso", "event_type": "FIREWALL_BLOCK"})
++        with sessions() as db:
++            calypso = [entry.score for entry in list_security_score_history(db, vessel_id="calypso")]
++            untouched = list_security_score_history(db, vessel_id="baltic-guardian")
++        assert calypso == [82, 87]  # newest first: 92 -> 87 -> 82
++        assert len(untouched) == 1  # initial entry only, no row per tick
++    finally:
++        main.app.dependency_overrides.clear()
+diff --git a/src/lib/seashield/backend.ts b/src/lib/seashield/backend.ts
+index a558221..fd3f380 100644
+--- a/src/lib/seashield/backend.ts
++++ b/src/lib/seashield/backend.ts
+@@ -16,7 +16,13 @@ const severity = (value: string): Severity => {
+   return ["critical", "high", "medium", "low", "info"].includes(normalized) ? normalized as Severity : "info";
+ };
+ const stateFor = (score: number): Vessel["securityState"] => score >= 86 ? "secure" : score >= 72 ? "elevated" : score >= 55 ? "warning" : "critical";
+-const dateMs = (value?: string) => value ? Date.parse(value) || Date.now() : Date.now();
++// SQLite returns timestamps without a UTC offset; treat those as UTC, not browser-local time.
++const HAS_TZ = /(?:Z|[+-]\d{2}:?\d{2})$/i;
++const dateMs = (value?: string) => {
++  if (!value) return Date.now();
++  const iso = value.replace(" ", "T");
++  return Date.parse(HAS_TZ.test(iso) ? iso : `${iso}Z`) || Date.now();
++};
+ 
+ function eventCategory(event: ApiEvent): SecurityEvent["category"] {
+   const type = event.event_type.toLowerCase();
+diff --git a/src/lib/seashield/store.ts b/src/lib/seashield/store.ts
+index 9b6aedd..140862b 100644
+--- a/src/lib/seashield/store.ts
++++ b/src/lib/seashield/store.ts
+@@ -57,18 +57,36 @@ type BackendPayload = {
+ export function hydrateFromBackend(payload: BackendPayload) {
+   const seeded = buildSeedState();
+   if (payload.vessels?.length) {
+-    const oldIds = seeded.vessels.map((v) => v.id);
+-    const mapped = payload.vessels.map((v, index) => {
+-      const visual = seeded.vessels[index % seeded.vessels.length]!;
+-      const score = v.score;
+-      const securityState = v.state;
+-      return { ...visual, ...v, securityScore: score, securityState, lastComms: v.lastComms };
++    // V2-only visual fixtures (sensors, access log, cyber findings) are attached to backend
++    // vessels by a stable slot: backend vessels sorted by ID. The API's list order (by name)
++    // therefore no longer decides which vessel gets which fixtures. Vessels beyond the number
++    // of fixture slots get no simulated fixtures instead of sharing another vessel's.
++    const slotOf = new Map(
++      [...payload.vessels].sort((a, b) => a.id.localeCompare(b.id)).map((v, index) => [v.id, index]),
++    );
++    const fixtureOwner = new Map<string, string>(); // seeded vessel id -> backend vessel id
++    state.vessels = payload.vessels.map((v) => {
++      const slot = slotOf.get(v.id)!;
++      const visual = seeded.vessels[slot % seeded.vessels.length]!;
++      if (slot < seeded.vessels.length) fixtureOwner.set(visual.id, v.id);
++      return {
++        ...visual,
++        id: v.id,
++        name: v.name,
++        imo: v.imo,
++        securityScore: v.score,
++        securityState: v.state,
++        lastComms: v.lastComms,
++      };
+     });
+-    const remap = new Map(oldIds.map((id, index) => [id, mapped[index % mapped.length]?.id ?? id]));
+-    state.vessels = mapped;
+-    state.sensors = seeded.sensors.map((item) => ({ ...item, vesselId: remap.get(item.vesselId) ?? item.vesselId }));
+-    state.access = seeded.access.map((item) => ({ ...item, vesselId: remap.get(item.vesselId) ?? item.vesselId }));
+-    state.cyber = seeded.cyber.map((item) => ({ ...item, vesselId: remap.get(item.vesselId) ?? item.vesselId }));
++    const owned = <T extends { vesselId: string }>(rows: T[]) =>
++      rows.flatMap((item) => {
++        const vesselId = fixtureOwner.get(item.vesselId);
++        return vesselId ? [{ ...item, vesselId }] : [];
++      });
++    state.sensors = owned(seeded.sensors);
++    state.access = owned(seeded.access);
++    state.cyber = owned(seeded.cyber);
+   }
+   if (payload.cameras) state.cameras = payload.cameras.map((camera) => ({ id: camera.id, vesselId: camera.vesselId, zone: camera.location, label: `CAM ${camera.location}`, state: camera.online ? "online" : "offline", recording: camera.recording, uptime: camera.online ? 99.9 : 0, fps: camera.online ? 25 : 0, lastFrame: camera.lastFrame }));
+   if (payload.events) state.events = payload.events.sort((a, b) => b.ts - a.ts);
+@@ -579,7 +597,7 @@ export function resetSimulation() {
+ export function tick() {
+   clockOffset += 2000;
+   state.cameras = state.cameras.map((c) =>
+-    c.state === "online" ? { ...c, lastFrame: now(), fps: 24 + ((counter + c.uptime) % 3) } : c,
++    c.state === "online" ? { ...c, lastFrame: now(), fps: 24 + ((counter + Math.round(c.uptime)) % 3) } : c,
+   );
+   state.vessels = state.vessels.map((v) => ({ ...v, lastComms: v.lastComms }));
+   state.sensors = state.sensors.map((s) =>
+-- 
+2.43.0
+

@@ -1,31 +1,55 @@
 from datetime import datetime, timezone
+from uuid import uuid4
 
 from fastapi import Cookie, Depends, FastAPI, HTTPException, Query, Response, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.orm import Session
+from starlette.middleware.base import BaseHTTPMiddleware
 
-from auth import SESSION_COOKIE, SESSION_TTL_SECONDS, authenticate, create_session, read_session
+from auth import SESSION_COOKIE, SESSION_TTL_SECONDS, auth_required, authenticate, create_session, read_session, validate_auth_configuration
 from db.database import Base, SessionLocal, engine as db_engine, get_db
 from db.events import create_event, delete_event, from_record, get_event, list_events, load_events
 from db.models import IncidentRecord, VesselRecord
-from db.repositories.event_repository import create_event_record, list_event_records
-from db.repositories.incident_repository import create_incident_record, get_incident_record, get_related_event_ids, list_incident_records
-from db.repositories.security_repository import append_security_score, list_security_score_history
+from db.repositories.event_repository import acknowledge_event, acknowledged_event_ids, create_event_record, list_event_records, resolve_all_open_events, set_event_status
+from db.repositories.incident_repository import add_incident_activity, add_incident_note, close_open_incident_records, create_incident_record, get_incident_record, get_related_event_ids, list_incident_activity, list_incident_notes, list_incident_records, update_incident_fields, update_incident_record
+from db.repositories.safety_repository import InvalidRoundTransition, cancel_safety_round, complete_safety_round, create_safety_finding, create_safety_round, get_safety_checkpoint, get_safety_round, list_safety_checkpoints, list_safety_rounds, start_safety_round, update_safety_checkpoint, update_safety_finding
+from db.repositories.security_repository import append_security_score, latest_security_score
 from db.repositories.vessel_repository import get_vessel_record, list_vessel_records, to_vessel_model, upsert_vessel_record
-from models.events import SecurityEvent
-from models.incidents import Incident, IncidentStatus, IncidentUpdate
+from models.events import EventCategory, SecurityEvent, Severity
+from models.incidents import Incident, IncidentCreate, IncidentNoteCreate, IncidentStatus, IncidentUpdate
+from models.safety_rounds import SafetyCheckpointPatch, SafetyCheckpointStatus, SafetyFindingCreate, SafetyFindingUpdate, SafetyRoundCreate
 from schemas.auth import LoginRequest, LoginResponse, UserResponse
-from schemas.security_events import SecurityEventCreate, SecurityEventResponse
+from schemas.security_events import EventAcknowledge, SecurityEventCreate, SecurityEventResponse
 from simulation.simulation_engine import SimulationEngine
 from websocket_manager import ConnectionManager
+
+APP_VERSION = "1.9.0"
 
 class ScenarioRequest(BaseModel):
     scenario: str
 
 
-app = FastAPI(title="SeaShield Security API", version="1.7.0", description="Simulation-only maritime security backend.")
+class InjectEventRequest(BaseModel):
+    vessel_id: str
+    event_type: str
+
+
+PUBLIC_PATHS = {"/health", "/api/auth/login", "/api/auth/logout", "/api/auth/me", "/api/auth/config", "/docs", "/redoc", "/openapi.json"}
+
+
+class RequireSessionMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        if auth_required() and request.method != "OPTIONS" and request.url.path not in PUBLIC_PATHS:
+            if read_session(request.cookies.get(SESSION_COOKIE)) is None:
+                return JSONResponse({"detail": "Not authenticated"}, status_code=401)
+        return await call_next(request)
+
+
+app = FastAPI(title="SeaShield Security API", version=APP_VERSION, description="Simulation-only maritime security backend.")
+app.add_middleware(RequireSessionMiddleware)
 app.add_middleware(CORSMiddleware, allow_origin_regex=r"https?://(localhost|127\.0\.0\.1):\d+", allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 app.state.websocket_manager = ConnectionManager()
 engine = SimulationEngine(seed=7)
@@ -65,14 +89,43 @@ async def broadcast_status_message(message_type: str, data: dict) -> None:
     })
 
 
+def incident_from_record(db: Session, record: IncidentRecord) -> Incident:
+    return Incident(
+        incident_id=record.incident_id,
+        vessel_id=record.vessel_id,
+        type=record.type,
+        title=record.title,
+        severity=Severity(record.severity),
+        status=IncidentStatus(record.status),
+        created_at=record.created_at,
+        updated_at=record.updated_at,
+        description=record.description,
+        related_event_ids=get_related_event_ids(db, record.incident_id),
+        affected_systems=[],
+        assigned_operator=record.assigned_operator,
+        investigation_notes=record.investigation_notes,
+        recommended_action=record.recommended_action,
+    )
+
+
+def persist_vessel_scores(db: Session) -> None:
+    for vessel in engine.vessels:
+        upsert_vessel_record(db, vessel_id=vessel.id, name=vessel.name, imo=vessel.imo, base_score=vessel.base_score, score=vessel.score, status=vessel.status)
+
+
+def sync_engine_from_db(db: Session) -> None:
+    engine.events = load_events(db)
+    engine.incidents._incidents = [incident_from_record(db, record) for record in list_incident_records(db)]
+    engine.recalculate()
+    persist_vessel_scores(db)
+
+
 @app.on_event("startup")
 def initialize_database() -> None:
+    validate_auth_configuration()
     Base.metadata.create_all(bind=db_engine)
     with SessionLocal() as db:
-        for vessel in engine.vessels:
-            upsert_vessel_record(db, vessel_id=vessel.id, name=vessel.name, imo=vessel.imo, base_score=vessel.base_score, score=vessel.score, status=vessel.status)
-        engine.events = load_events(db)
-        engine.recalculate()
+        sync_engine_from_db(db)
 
 
 @app.get("/health")

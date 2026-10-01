@@ -1,0 +1,778 @@
+From c74510756b4c387c5cc1795788b507d7cf9373ec Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 24 Sep 2026 09:38:32 +0300
+Subject: [PATCH 4/8] Persist operator actions: manual incidents, field edits,
+ notes, event ACK
+
+Previously these only lived in the frontend store and were overwritten by the
+next backend refresh (i.e. on the next WebSocket message).
+
+Backend
+- POST /api/v1/incidents: open an incident manually (ID from the same
+  sequence as correlated incidents; counts toward the vessel score).
+- PATCH /api/v1/incidents/{id} is now partial: status, severity,
+  assigned_operator, investigation_notes, actor (all optional).
+- POST /api/v1/incidents/{id}/notes: append an investigation note.
+- POST /api/security-events/{event_id}/acknowledge; event responses carry
+  "acknowledged".
+- Incident responses include "notes" and "timeline". The timeline is an
+  append-only audit trail (incident_activity): opened by correlation/manual,
+  each operator change with before/after values, notes added.
+- New tables incident_notes, incident_activity, event_acknowledgements
+  (created by create_all; Alembic migration 20260924_0004 included).
+- WebSocket messages: incident_created, event_acknowledged.
+
+Frontend
+- services.ts applies changes optimistically, then persists them through the
+  new endpoints; if the backend is unreachable the local change is kept.
+- Events are keyed by event_id instead of the numeric DB id, so an incident's
+  "Related events" list now actually shows its events.
+- Notes and timeline are rendered from the backend data.
+
+Tests: tests/test_incident_workflow.py.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01F8gdxt3tGbrWATzufnb6wB
+---
+ ...60924_0004_incident_notes_activity_acks.py |  66 ++++++++++
+ backend/app/main.py                           | 115 +++++++++++++++---
+ backend/db/models.py                          |  32 +++++
+ backend/db/repositories/event_repository.py   |  19 ++-
+ .../db/repositories/incident_repository.py    |  45 ++++++-
+ backend/models/incidents.py                   |  22 +++-
+ backend/schemas/security_events.py            |   5 +
+ backend/security_engine/incident_manager.py   |   4 +
+ backend/tests/test_incident_workflow.py       |  87 +++++++++++++
+ src/lib/seashield/backend.ts                  |  47 +++++--
+ src/lib/seashield/services.ts                 |  46 +++++--
+ 11 files changed, 454 insertions(+), 34 deletions(-)
+ create mode 100644 backend/alembic/versions/20260924_0004_incident_notes_activity_acks.py
+ create mode 100644 backend/tests/test_incident_workflow.py
+
+diff --git a/backend/alembic/versions/20260924_0004_incident_notes_activity_acks.py b/backend/alembic/versions/20260924_0004_incident_notes_activity_acks.py
+new file mode 100644
+index 0000000..0280dda
+--- /dev/null
++++ b/backend/alembic/versions/20260924_0004_incident_notes_activity_acks.py
+@@ -0,0 +1,66 @@
++"""incident notes, incident activity timeline and event acknowledgements
++
++Revision ID: 20260924_0004
++Revises: 20260906_0003
++Create Date: 2026-09-24
++
++Note: the V1.9 safety round tables (safety_rounds, safety_checkpoints,
++safety_findings) have no migration yet; they are created by
++Base.metadata.create_all() on startup.
++"""
++from collections.abc import Sequence
++
++import sqlalchemy as sa
++from alembic import op
++
++revision: str = "20260924_0004"
++down_revision: str | Sequence[str] | None = "20260906_0003"
++branch_labels: str | Sequence[str] | None = None
++depends_on: str | Sequence[str] | None = None
++
++
++def upgrade() -> None:
++    op.create_table(
++        "incident_notes",
++        sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
++        sa.Column("note_id", sa.String(length=100), nullable=False),
++        sa.Column("incident_id", sa.String(length=100), sa.ForeignKey("incidents.incident_id"), nullable=False),
++        sa.Column("author", sa.String(length=160), nullable=False, server_default=""),
++        sa.Column("body", sa.Text(), nullable=False),
++        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
++    )
++    op.create_index("ix_incident_notes_note_id", "incident_notes", ["note_id"], unique=True)
++    op.create_index("ix_incident_notes_incident_id", "incident_notes", ["incident_id"])
++    op.create_index("ix_incident_notes_created_at", "incident_notes", ["created_at"])
++
++    op.create_table(
++        "incident_activity",
++        sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
++        sa.Column("incident_id", sa.String(length=100), sa.ForeignKey("incidents.incident_id"), nullable=False),
++        sa.Column("text", sa.Text(), nullable=False),
++        sa.Column("actor", sa.String(length=160), nullable=True),
++        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
++    )
++    op.create_index("ix_incident_activity_incident_id", "incident_activity", ["incident_id"])
++    op.create_index("ix_incident_activity_created_at", "incident_activity", ["created_at"])
++
++    op.create_table(
++        "event_acknowledgements",
++        sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
++        sa.Column("event_id", sa.String(length=100), nullable=False),
++        sa.Column("acknowledged_by", sa.String(length=160), nullable=False, server_default=""),
++        sa.Column("acknowledged_at", sa.DateTime(timezone=True), nullable=False),
++    )
++    op.create_index("ix_event_acknowledgements_event_id", "event_acknowledgements", ["event_id"], unique=True)
++
++
++def downgrade() -> None:
++    op.drop_index("ix_event_acknowledgements_event_id", table_name="event_acknowledgements")
++    op.drop_table("event_acknowledgements")
++    op.drop_index("ix_incident_activity_created_at", table_name="incident_activity")
++    op.drop_index("ix_incident_activity_incident_id", table_name="incident_activity")
++    op.drop_table("incident_activity")
++    op.drop_index("ix_incident_notes_created_at", table_name="incident_notes")
++    op.drop_index("ix_incident_notes_incident_id", table_name="incident_notes")
++    op.drop_index("ix_incident_notes_note_id", table_name="incident_notes")
++    op.drop_table("incident_notes")
+diff --git a/backend/app/main.py b/backend/app/main.py
+index 01b03f4..b2297b0 100644
+--- a/backend/app/main.py
++++ b/backend/app/main.py
+@@ -11,8 +11,20 @@ from auth import SESSION_COOKIE, SESSION_TTL_SECONDS, authenticate, create_sessi
+ from db.database import Base, SessionLocal, engine as db_engine, get_db
+ from db.events import create_event, delete_event, from_record, get_event, list_events, load_events
+ from db.models import IncidentRecord, VesselRecord
+-from db.repositories.event_repository import create_event_record, list_event_records, resolve_all_open_events, set_event_status
+-from db.repositories.incident_repository import close_open_incident_records, create_incident_record, get_incident_record, get_related_event_ids, list_incident_records, update_incident_record
++from db.repositories.event_repository import acknowledge_event, acknowledged_event_ids, create_event_record, list_event_records, resolve_all_open_events, set_event_status
++from db.repositories.incident_repository import (
++    add_incident_activity,
++    add_incident_note,
++    close_open_incident_records,
++    create_incident_record,
++    get_incident_record,
++    get_related_event_ids,
++    list_incident_activity,
++    list_incident_notes,
++    list_incident_records,
++    update_incident_fields,
++    update_incident_record,
++)
+ from db.repositories.safety_repository import (
+     InvalidRoundTransition,
+     cancel_safety_round,
+@@ -33,10 +45,10 @@ from db.repositories.safety_repository import (
+ from db.repositories.security_repository import append_security_score, list_security_score_history
+ from db.repositories.vessel_repository import get_vessel_record, list_vessel_records, to_vessel_model, upsert_vessel_record
+ from models.events import EventCategory, SecurityEvent, Severity
+-from models.incidents import Incident, IncidentStatus, IncidentUpdate
++from models.incidents import Incident, IncidentCreate, IncidentNoteCreate, IncidentStatus, IncidentUpdate
+ from models.safety_rounds import SafetyCheckpointPatch, SafetyCheckpointStatus, SafetyFindingCreate, SafetyFindingUpdate, SafetyRoundCreate
+ from schemas.auth import LoginRequest, LoginResponse, UserResponse
+-from schemas.security_events import SecurityEventCreate, SecurityEventResponse
++from schemas.security_events import EventAcknowledge, SecurityEventCreate, SecurityEventResponse
+ from simulation.simulation_engine import SimulationEngine
+ from websocket_manager import ConnectionManager
+ 
+@@ -59,9 +71,9 @@ engine = SimulationEngine(seed=7)
+ engine.set_broadcaster(app.state.websocket_manager.broadcast)
+ 
+ 
+-def event_response(record):
++def event_response(record, acknowledged: bool = False):
+     event = from_record(record)
+-    return SecurityEventResponse(id=record.id, created_at=record.created_at, **event.model_dump())
++    return SecurityEventResponse(id=record.id, created_at=record.created_at, acknowledged=acknowledged, **event.model_dump())
+ 
+ 
+ def incident_response(record: IncidentRecord, related_event_ids: list[str] | None = None) -> dict:
+@@ -84,6 +96,21 @@ def incident_response(record: IncidentRecord, related_event_ids: list[str] | Non
+     }
+ 
+ 
++def incident_payload(db: Session, record: IncidentRecord) -> dict:
++    """Full incident representation including notes and the audit timeline."""
++    payload = incident_response(record, get_related_event_ids(db, record.incident_id))
++    payload["notes"] = [
++        {"note_id": note.note_id, "author": note.author, "body": note.body, "created_at": note.created_at}
++        for note in list_incident_notes(db, record.incident_id)
++    ]
++    activity = list_incident_activity(db, record.incident_id)
++    payload["timeline"] = [
++        {"id": f"act-{item.id}", "text": item.text, "actor": item.actor, "created_at": item.created_at}
++        for item in activity
++    ] or [{"id": f"{record.incident_id}-opened", "text": "Incident opened.", "actor": None, "created_at": record.created_at}]
++    return payload
++
++
+ async def broadcast_status_message(message_type: str, data: dict) -> None:
+     await app.state.websocket_manager.broadcast({
+         "type": message_type,
+@@ -240,6 +267,7 @@ def persist_result(db: Session, result, scenario: str | None):
+         append_security_score(db, vessel_id=vessel.id, score=vessel.score, previous_score=next((entry.score for entry in list_security_score_history(db, vessel_id=vessel.id)[:1]), None), reason="simulation_update")
+     if result.correlation:
+         incident = engine.incidents.create_from_correlation(result.correlation)
++        is_new = get_incident_record(db, incident.incident_id) is None
+         create_incident_record(
+             db,
+             incident_id=incident.incident_id,
+@@ -251,12 +279,16 @@ def persist_result(db: Session, result, scenario: str | None):
+             status=incident.status.value,
+             related_event_ids=list(incident.related_event_ids),
+         )
++        if is_new:
++            add_incident_activity(db, incident.incident_id, f"Incident opened by the correlation engine ({len(incident.related_event_ids)} related events).", actor="Correlation engine")
+     return result
+ 
+ 
+ @app.get("/api/security-events", response_model=list[SecurityEventResponse])
+ def get_security_events(limit: int = Query(50, ge=1, le=500), offset: int = Query(0, ge=0), severity: str | None = None, event_type: str | None = None, status: str | None = None, scenario: str | None = None, vessel_id: str | None = None, start: datetime | None = None, end: datetime | None = None, db: Session = Depends(get_db)):
+-    return [event_response(event) for event in list_events(db, limit=limit, offset=offset, severity=severity, event_type=event_type, status=status, scenario=scenario, vessel_id=vessel_id, start=start, end=end)]
++    records = list_events(db, limit=limit, offset=offset, severity=severity, event_type=event_type, status=status, scenario=scenario, vessel_id=vessel_id, start=start, end=end)
++    acked = acknowledged_event_ids(db, [record.event_id for record in records])
++    return [event_response(record, record.event_id in acked) for record in records]
+ 
+ 
+ @app.get("/api/security-events/{event_id}", response_model=SecurityEventResponse)
+@@ -264,7 +296,17 @@ def get_security_event(event_id: str, db: Session = Depends(get_db)):
+     event = get_event(db, event_id)
+     if event is None:
+         raise HTTPException(status_code=404, detail="Security event not found")
+-    return event_response(event)
++    return event_response(event, bool(acknowledged_event_ids(db, [event.event_id])))
++
++
++@app.post("/api/security-events/{event_id}/acknowledge", response_model=SecurityEventResponse)
++async def acknowledge_security_event(event_id: str, payload: EventAcknowledge | None = None, db: Session = Depends(get_db)):
++    event = get_event(db, event_id)
++    if event is None:
++        raise HTTPException(status_code=404, detail="Security event not found")
++    acknowledge_event(db, event_id, (payload or EventAcknowledge()).acknowledged_by)
++    await broadcast_status_message("event_acknowledged", {"event_id": event_id})
++    return event_response(event, True)
+ 
+ 
+ @app.post("/api/security-events", response_model=SecurityEventResponse, status_code=201)
+@@ -285,7 +327,7 @@ def remove_security_event(event_id: str, db: Session = Depends(get_db)):
+ def get_incidents(db: Session = Depends(get_db)):
+     records = list_incident_records(db)
+     if records:
+-        return [incident_response(record, get_related_event_ids(db, record.incident_id)) for record in records]
++        return [incident_payload(db, record) for record in records]
+     return engine.incidents.get_all()
+ 
+ 
+@@ -309,24 +351,69 @@ def get_incident(incident_id: str, db: Session = Depends(get_db)):
+         if incident is None:
+             raise HTTPException(status_code=404, detail="Incident not found")
+         return incident
+-    return incident_response(record, get_related_event_ids(db, record.incident_id))
++    return incident_payload(db, record)
+ 
+ 
+ @app.patch("/incidents/{incident_id}")
+ @app.patch("/api/v1/incidents/{incident_id}")
+ async def update_incident(incident_id: str, update: IncidentUpdate, db: Session = Depends(get_db)):
+-    record = update_incident_record(db, incident_id, status=update.status.value, investigation_notes=update.investigation_notes)
++    record = get_incident_record(db, incident_id)
+     if record is None:
+         raise HTTPException(status_code=404, detail="Incident not found")
+-    related = get_related_event_ids(db, incident_id)
++    changes: list[str] = []
++    if update.status is not None and update.status.value != record.status:
++        changes.append(f"status {record.status} \u2192 {update.status.value}")
++    if update.severity is not None and update.severity.value != record.severity:
++        changes.append(f"severity {record.severity} \u2192 {update.severity.value}")
++    if update.assigned_operator is not None and update.assigned_operator != record.assigned_operator:
++        changes.append(f"assignee {record.assigned_operator} \u2192 {update.assigned_operator}")
++    if update.status is not None or update.investigation_notes:
++        record = update_incident_record(db, incident_id, status=(update.status.value if update.status is not None else record.status), investigation_notes=update.investigation_notes)
++    if update.severity is not None or update.assigned_operator is not None:
++        record = update_incident_fields(db, incident_id, severity=update.severity.value if update.severity is not None else None, assigned_operator=update.assigned_operator)
++    if changes:
++        add_incident_activity(db, incident_id, "Operator update: " + ", ".join(changes) + ".", actor=update.actor)
+     if update.status in {IncidentStatus.RESOLVED, IncidentStatus.FALSE_POSITIVE}:
+-        set_event_status(db, related, "RESOLVED")
++        set_event_status(db, get_related_event_ids(db, incident_id), "RESOLVED")
+     sync_engine_from_db(db)
+-    payload = incident_response(record, related)
++    payload = incident_payload(db, record)
+     await broadcast_status_message("incident_updated", {"incident_id": incident_id, "status": record.status})
+     return payload
+ 
+ 
++@app.post("/api/v1/incidents", status_code=201)
++async def create_incident(payload: IncidentCreate, db: Session = Depends(get_db)):
++    """Open an incident manually (operator-raised, not from correlation)."""
++    if not any(vessel.id == payload.vessel_id for vessel in engine.vessels):
++        raise HTTPException(status_code=404, detail="Vessel not found")
++    incident_id = engine.incidents.reserve_id()
++    record = create_incident_record(
++        db,
++        incident_id=incident_id,
++        vessel_id=payload.vessel_id,
++        type=payload.system,
++        title=payload.title,
++        severity=payload.severity.value,
++        description=payload.description or payload.title,
++        assigned_operator=payload.assigned_operator,
++    )
++    add_incident_activity(db, incident_id, "Incident opened manually by operator.", actor=payload.created_by)
++    sync_engine_from_db(db)
++    await broadcast_status_message("incident_created", {"incident_id": incident_id})
++    return incident_payload(db, record)
++
++
++@app.post("/api/v1/incidents/{incident_id}/notes", status_code=201)
++async def create_incident_note(incident_id: str, payload: IncidentNoteCreate, db: Session = Depends(get_db)):
++    record = get_incident_record(db, incident_id)
++    if record is None:
++        raise HTTPException(status_code=404, detail="Incident not found")
++    add_incident_note(db, incident_id, author=payload.author, body=payload.body)
++    add_incident_activity(db, incident_id, "Investigation note added.", actor=payload.author)
++    await broadcast_status_message("incident_updated", {"incident_id": incident_id, "status": record.status})
++    return incident_payload(db, get_incident_record(db, incident_id))
++
++
+ @app.get("/simulation/status")
+ @app.get("/api/v1/simulation/status")
+ def simulation_status():
+diff --git a/backend/db/models.py b/backend/db/models.py
+index bbdc06c..ffd9659 100644
+--- a/backend/db/models.py
++++ b/backend/db/models.py
+@@ -154,3 +154,35 @@ class SafetyFindingRecord(Base):
+     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
+     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
++
++
++class IncidentNoteRecord(Base):
++    __tablename__ = "incident_notes"
++    __table_args__ = {"extend_existing": True}
++    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
++    note_id: Mapped[str] = mapped_column(String(100), unique=True, index=True)
++    incident_id: Mapped[str] = mapped_column(String(100), ForeignKey("incidents.incident_id"), index=True)
++    author: Mapped[str] = mapped_column(String(160), default="")
++    body: Mapped[str] = mapped_column(Text, nullable=False)
++    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
++
++
++class IncidentActivityRecord(Base):
++    """Append-only audit trail of what happened to an incident (shown as the UI timeline)."""
++
++    __tablename__ = "incident_activity"
++    __table_args__ = {"extend_existing": True}
++    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
++    incident_id: Mapped[str] = mapped_column(String(100), ForeignKey("incidents.incident_id"), index=True)
++    text: Mapped[str] = mapped_column(Text, nullable=False)
++    actor: Mapped[str | None] = mapped_column(String(160), nullable=True)
++    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
++
++
++class EventAcknowledgementRecord(Base):
++    __tablename__ = "event_acknowledgements"
++    __table_args__ = {"extend_existing": True}
++    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
++    event_id: Mapped[str] = mapped_column(String(100), unique=True, index=True)
++    acknowledged_by: Mapped[str] = mapped_column(String(160), default="")
++    acknowledged_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+diff --git a/backend/db/repositories/event_repository.py b/backend/db/repositories/event_repository.py
+index b458b73..f3b0f4f 100644
+--- a/backend/db/repositories/event_repository.py
++++ b/backend/db/repositories/event_repository.py
+@@ -5,7 +5,7 @@ from datetime import datetime
+ from sqlalchemy import Select, delete, select, update
+ from sqlalchemy.orm import Session
+ 
+-from db.models import SecurityEventRecord
++from db.models import EventAcknowledgementRecord, SecurityEventRecord
+ 
+ 
+ def create_event_record(
+@@ -102,3 +102,20 @@ def resolve_all_open_events(db: Session) -> int:
+     result = db.execute(update(SecurityEventRecord).where(SecurityEventRecord.status != "RESOLVED").values(status="RESOLVED"))
+     db.commit()
+     return result.rowcount
++
++
++def acknowledge_event(db: Session, event_id: str, acknowledged_by: str) -> EventAcknowledgementRecord:
++    existing = db.scalar(select(EventAcknowledgementRecord).where(EventAcknowledgementRecord.event_id == event_id))
++    if existing is not None:
++        return existing
++    record = EventAcknowledgementRecord(event_id=event_id, acknowledged_by=acknowledged_by)
++    db.add(record)
++    db.commit()
++    db.refresh(record)
++    return record
++
++
++def acknowledged_event_ids(db: Session, event_ids: list[str]) -> set[str]:
++    if not event_ids:
++        return set()
++    return set(db.scalars(select(EventAcknowledgementRecord.event_id).where(EventAcknowledgementRecord.event_id.in_(event_ids))).all())
+diff --git a/backend/db/repositories/incident_repository.py b/backend/db/repositories/incident_repository.py
+index ad27352..60aa502 100644
+--- a/backend/db/repositories/incident_repository.py
++++ b/backend/db/repositories/incident_repository.py
+@@ -1,11 +1,12 @@
+ from __future__ import annotations
+ 
+ from datetime import datetime, timezone
++from uuid import uuid4
+ 
+ from sqlalchemy import select
+ from sqlalchemy.orm import Session
+ 
+-from db.models import IncidentEventLink, IncidentRecord
++from db.models import IncidentActivityRecord, IncidentEventLink, IncidentNoteRecord, IncidentRecord
+ 
+ 
+ def create_incident_record(
+@@ -100,3 +101,45 @@ def close_open_incident_records(db: Session, *, status: str, note: str) -> int:
+         record.updated_at = now
+     db.commit()
+     return len(records)
++
++
++def add_incident_activity(db: Session, incident_id: str, text: str, actor: str | None = None) -> IncidentActivityRecord:
++    record = IncidentActivityRecord(incident_id=incident_id, text=text, actor=actor, created_at=datetime.now(timezone.utc))
++    db.add(record)
++    db.commit()
++    return record
++
++
++def list_incident_activity(db: Session, incident_id: str) -> list[IncidentActivityRecord]:
++    query = select(IncidentActivityRecord).where(IncidentActivityRecord.incident_id == incident_id).order_by(IncidentActivityRecord.created_at.asc(), IncidentActivityRecord.id.asc())
++    return list(db.scalars(query).all())
++
++
++def add_incident_note(db: Session, incident_id: str, *, author: str, body: str) -> IncidentNoteRecord:
++    record = IncidentNoteRecord(note_id=f"note-{uuid4().hex[:12]}", incident_id=incident_id, author=author, body=body, created_at=datetime.now(timezone.utc))
++    db.add(record)
++    record_incident = get_incident_record(db, incident_id)
++    if record_incident is not None:
++        record_incident.updated_at = datetime.now(timezone.utc)
++    db.commit()
++    db.refresh(record)
++    return record
++
++
++def list_incident_notes(db: Session, incident_id: str) -> list[IncidentNoteRecord]:
++    query = select(IncidentNoteRecord).where(IncidentNoteRecord.incident_id == incident_id).order_by(IncidentNoteRecord.created_at.asc(), IncidentNoteRecord.id.asc())
++    return list(db.scalars(query).all())
++
++
++def update_incident_fields(db: Session, incident_id: str, *, severity: str | None = None, assigned_operator: str | None = None) -> IncidentRecord | None:
++    record = get_incident_record(db, incident_id)
++    if record is None:
++        return None
++    if severity is not None:
++        record.severity = severity
++    if assigned_operator is not None:
++        record.assigned_operator = assigned_operator
++    record.updated_at = datetime.now(timezone.utc)
++    db.commit()
++    db.refresh(record)
++    return record
+diff --git a/backend/models/incidents.py b/backend/models/incidents.py
+index 0edf30d..2e9a766 100644
+--- a/backend/models/incidents.py
++++ b/backend/models/incidents.py
+@@ -32,5 +32,25 @@ class Incident(BaseModel):
+ 
+ 
+ class IncidentUpdate(BaseModel):
+-    status: IncidentStatus
++    """Partial update: omitted fields are left unchanged."""
++
++    status: IncidentStatus | None = None
++    severity: Severity | None = None
++    assigned_operator: str | None = Field(default=None, max_length=160)
+     investigation_notes: str = ""
++    actor: str | None = Field(default=None, max_length=160)
++
++
++class IncidentCreate(BaseModel):
++    vessel_id: str = Field(min_length=1, max_length=100)
++    title: str = Field(min_length=1, max_length=200)
++    system: str = Field(default="Manual", min_length=1, max_length=160)
++    severity: Severity = Severity.MEDIUM
++    assigned_operator: str = Field(default="J. Dawson", max_length=160)
++    description: str = ""
++    created_by: str | None = Field(default=None, max_length=160)
++
++
++class IncidentNoteCreate(BaseModel):
++    author: str = Field(default="Operator", min_length=1, max_length=160)
++    body: str = Field(min_length=1, max_length=4000)
+diff --git a/backend/schemas/security_events.py b/backend/schemas/security_events.py
+index 206c798..ed8d58c 100644
+--- a/backend/schemas/security_events.py
++++ b/backend/schemas/security_events.py
+@@ -26,3 +26,8 @@ class SecurityEventResponse(SecurityEventCreate):
+     model_config = ConfigDict(from_attributes=True)
+     id: int
+     created_at: datetime
++    acknowledged: bool = False
++
++
++class EventAcknowledge(BaseModel):
++    acknowledged_by: str = Field(default="Operator", min_length=1, max_length=160)
+diff --git a/backend/security_engine/incident_manager.py b/backend/security_engine/incident_manager.py
+index 7a370ba..3a3c5af 100644
+--- a/backend/security_engine/incident_manager.py
++++ b/backend/security_engine/incident_manager.py
+@@ -44,6 +44,10 @@ class IncidentManager:
+         self._incidents.insert(0, incident)
+         return incident
+ 
++    def reserve_id(self) -> str:
++        """Allocate the next incident ID (used for manually opened incidents)."""
++        return self._next_id()
++
+     def get_all(self) -> list[Incident]:
+         return list(self._incidents)
+ 
+diff --git a/backend/tests/test_incident_workflow.py b/backend/tests/test_incident_workflow.py
+new file mode 100644
+index 0000000..3a9456b
+--- /dev/null
++++ b/backend/tests/test_incident_workflow.py
+@@ -0,0 +1,87 @@
++"""Operator actions (manual incidents, field edits, notes, event ACK) are persisted server-side."""
++
++import pytest
++from fastapi.testclient import TestClient
++from sqlalchemy import create_engine
++from sqlalchemy.orm import sessionmaker
++
++import app.main as main
++from db.database import Base, get_db
++from simulation.simulation_engine import SimulationEngine
++
++
++@pytest.fixture()
++def sessions(tmp_path):
++    database_engine = create_engine(f"sqlite:///{tmp_path / 'workflow.db'}", connect_args={"check_same_thread": False})
++    Base.metadata.create_all(database_engine)
++    yield sessionmaker(bind=database_engine, autoflush=False, expire_on_commit=False)
++    main.app.dependency_overrides.clear()
++    Base.metadata.drop_all(database_engine)
++
++
++def boot(sessions, monkeypatch) -> TestClient:
++    engine = SimulationEngine(seed=7)
++    engine.set_broadcaster(main.app.state.websocket_manager.broadcast)
++    monkeypatch.setattr(main, "engine", engine)
++    monkeypatch.setattr(main, "SessionLocal", sessions)
++
++    def override_db():
++        with sessions() as session:
++            yield session
++
++    main.app.dependency_overrides[get_db] = override_db
++    return TestClient(main.app)
++
++
++def test_manual_incident_edits_and_notes_survive_restart(sessions, monkeypatch):
++    with boot(sessions, monkeypatch) as client:
++        created = client.post("/api/v1/incidents", json={"vessel_id": "iron-horizon", "title": "Crew report: open hatch", "system": "CCTV", "severity": "MEDIUM", "assigned_operator": "R. Vance", "created_by": "R. Vance"})
++        assert created.status_code == 201, created.text
++        incident_id = created.json()["incident_id"]
++        assert incident_id.startswith("INC-")
++        patched = client.patch(f"/api/v1/incidents/{incident_id}", json={"severity": "HIGH", "assigned_operator": "J. Dawson", "actor": "R. Vance"})
++        assert patched.status_code == 200
++        assert (patched.json()["severity"], patched.json()["assigned_operator"], patched.json()["status"]) == ("HIGH", "J. Dawson", "NEW")
++        note = client.post(f"/api/v1/incidents/{incident_id}/notes", json={"author": "R. Vance", "body": "Hatch secured by deck crew."})
++        assert note.status_code == 201
++
++    with boot(sessions, monkeypatch) as client:  # restart
++        [incident] = client.get("/api/v1/incidents").json()
++        assert incident["severity"] == "HIGH"
++        assert incident["assigned_operator"] == "J. Dawson"
++        assert [n["body"] for n in incident["notes"]] == ["Hatch secured by deck crew."]
++        texts = [t["text"] for t in incident["timeline"]]
++        assert texts[0] == "Incident opened manually by operator."
++        assert any("severity MEDIUM" in text and "assignee R. Vance" in text for text in texts)
++        assert texts[-1] == "Investigation note added."
++        # a manual incident counts toward the vessel score (HIGH incident = -15)
++        vessel = next(v for v in client.get("/api/v1/vessels").json() if v["id"] == "iron-horizon")
++        assert vessel["score"] == 93 - 15
++
++
++def test_manual_incident_ids_do_not_clash_with_correlated_ones(sessions, monkeypatch):
++    with boot(sessions, monkeypatch) as client:
++        manual = client.post("/api/v1/incidents", json={"vessel_id": "calypso", "title": "Manual"}).json()["incident_id"]
++        client.post("/api/v1/simulation/inject", json={"vessel_id": "calypso", "event_type": "UNAUTHORIZED_ACCESS"})
++        client.post("/api/v1/simulation/inject", json={"vessel_id": "calypso", "event_type": "CAMERA_OFFLINE"})
++        ids = [row["incident_id"] for row in client.get("/api/v1/incidents").json()]
++        assert len(ids) == 2 and len(set(ids)) == 2 and manual in ids
++
++
++def test_unknown_vessel_or_incident_is_rejected(sessions, monkeypatch):
++    with boot(sessions, monkeypatch) as client:
++        assert client.post("/api/v1/incidents", json={"vessel_id": "meridian", "title": "x"}).status_code == 404
++        assert client.post("/api/v1/incidents/INC-9999/notes", json={"body": "x"}).status_code == 404
++        assert client.patch("/api/v1/incidents/INC-9999", json={"status": "RESOLVED"}).status_code == 404
++
++
++def test_event_acknowledgement_is_persisted(sessions, monkeypatch):
++    with boot(sessions, monkeypatch) as client:
++        event_id = client.post("/api/v1/simulation/inject", json={"vessel_id": "calypso", "event_type": "FIREWALL_BLOCK"}).json()["event"]["event_id"]
++        assert client.get("/api/security-events?limit=5").json()[0]["acknowledged"] is False
++        response = client.post(f"/api/security-events/{event_id}/acknowledge", json={"acknowledged_by": "R. Vance"})
++        assert response.status_code == 200 and response.json()["acknowledged"] is True
++        assert client.post("/api/security-events/nope/acknowledge").status_code == 404
++
++    with boot(sessions, monkeypatch) as client:  # restart
++        assert client.get("/api/security-events?limit=5").json()[0]["acknowledged"] is True
+diff --git a/src/lib/seashield/backend.ts b/src/lib/seashield/backend.ts
+index 44d8b82..781fe7e 100644
+--- a/src/lib/seashield/backend.ts
++++ b/src/lib/seashield/backend.ts
+@@ -6,8 +6,10 @@ const WS_URL = API_URL.replace(/^http/, "ws") + "/ws/security";
+ 
+ type ApiVessel = { id: string; name: string; imo: string; score: number; status: string; last_communication?: string };
+ type ApiCamera = { id: string; vessel_id: string; location: string; online: boolean; recording: boolean; last_heartbeat?: string };
+-type ApiEvent = { id?: string; event_id?: string; timestamp: string; vessel_id: string; event_type: string; category: string; severity: string; source: string; description: string; title?: string; status?: string };
+-type ApiIncident = { incident_id: string; vessel_id: string; title: string; type: string; severity: string; status: string; created_at: string; updated_at: string; related_event_ids?: string[]; assigned_operator?: string; investigation_notes?: string };
++type ApiEvent = { id?: number; event_id?: string; timestamp: string; vessel_id: string; event_type: string; category: string; severity: string; source: string; description: string; title?: string; status?: string; acknowledged?: boolean };
++type ApiNote = { note_id: string; author: string; body: string; created_at: string };
++type ApiTimelineEntry = { id: string; text: string; actor?: string | null; created_at: string };
++type ApiIncident = { incident_id: string; vessel_id: string; title: string; type: string; severity: string; status: string; created_at: string; updated_at: string; related_event_ids?: string[]; assigned_operator?: string; investigation_notes?: string; notes?: ApiNote[]; timeline?: ApiTimelineEntry[] };
+ 
+ const severity = (value: string): Severity => {
+   const normalized = value.toLowerCase();
+@@ -36,14 +38,23 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
+   return response.status === 204 ? undefined as T : response.json() as Promise<T>;
+ }
+ 
++function mapIncident(i: ApiIncident): Incident {
++  const notes = (i.notes ?? []).map((n) => ({ id: n.note_id, ts: dateMs(n.created_at), author: n.author, body: n.body }));
++  // legacy single-text notes from older backends
++  if (!notes.length && i.investigation_notes) notes.push({ id: `${i.incident_id}-note`, ts: dateMs(i.updated_at), author: i.assigned_operator ?? "Security Operator", body: i.investigation_notes });
++  const timeline = (i.timeline ?? [{ id: `${i.incident_id}-opened`, text: "Incident opened.", created_at: i.created_at }]).map((t) => ({ id: t.id, ts: dateMs(t.created_at), text: t.actor ? `${t.text} (${t.actor})` : t.text }));
++  return { id: i.incident_id, ref: i.incident_id, title: i.title, vesselId: i.vessel_id, system: i.type, severity: severity(i.severity), status: incidentStatus(i.status), assignee: i.assigned_operator ?? "Security Operator", openedAt: dateMs(i.created_at), updatedAt: dateMs(i.updated_at), eventIds: i.related_event_ids ?? [], notes, timeline };
++}
++
+ export async function refreshSeaShieldBackend() {
+   const [health, vessels, cameras, events, incidents] = await Promise.all([request<{ status: string }>("/health"), request<ApiVessel[]>("/api/v1/vessels"), request<ApiCamera[]>("/api/v1/cameras"), request<ApiEvent[]>("/api/security-events?limit=100"), request<ApiIncident[]>("/api/v1/incidents")]);
+   hydrateFromBackend({
+     health: health.status,
+     vessels: vessels.map((v) => ({ id: v.id, name: v.name, imo: v.imo, score: v.score, state: stateFor(v.score), lastComms: dateMs(v.last_communication) })),
+     cameras: cameras.map((c) => ({ id: c.id, vesselId: c.vessel_id, location: c.location, online: c.online, recording: c.recording, lastFrame: dateMs(c.last_heartbeat) })),
+-    events: events.map((e) => ({ id: e.id ?? e.event_id ?? crypto.randomUUID(), ts: dateMs(e.timestamp), vesselId: e.vessel_id, category: eventCategory(e), severity: severity(e.severity), title: e.title ?? e.event_type.replaceAll("_", " "), detail: e.description, source: e.source, acknowledged: e.status?.toLowerCase() === "resolved" })),
+-    incidents: incidents.map((i) => ({ id: i.incident_id, ref: i.incident_id, title: i.title, vesselId: i.vessel_id, system: i.type, severity: severity(i.severity), status: incidentStatus(i.status), assignee: i.assigned_operator ?? "Security Operator", openedAt: dateMs(i.created_at), updatedAt: dateMs(i.updated_at), eventIds: i.related_event_ids ?? [], notes: i.investigation_notes ? [{ id: `${i.incident_id}-note`, ts: dateMs(i.updated_at), author: i.assigned_operator ?? "Security Operator", body: i.investigation_notes }] : [], timeline: [{ id: `${i.incident_id}-opened`, ts: dateMs(i.created_at), text: "Incident opened by the V1.8 correlation engine." }] })),
++    // event_id (not the numeric DB id) is what incidents reference in related_event_ids
++    events: events.map((e) => ({ id: e.event_id ?? String(e.id ?? crypto.randomUUID()), ts: dateMs(e.timestamp), vesselId: e.vessel_id, category: eventCategory(e), severity: severity(e.severity), title: e.title ?? e.event_type.replaceAll("_", " "), detail: e.description, source: e.source, acknowledged: Boolean(e.acknowledged) || e.status?.toLowerCase() === "resolved" })),
++    incidents: incidents.map(mapIncident),
+   });
+ }
+ /** Each UI scenario injects exactly one V1.8 event of the matching type for the chosen vessel. */
+@@ -71,9 +82,31 @@ export async function runBackendScenario(uiScenario: string, vesselId: string) {
+   return result?.correlation ? `${label} injected · correlated: ${result.correlation.title}` : `${label} injected`;
+ }
+ export async function resetBackendSimulation() { await request("/api/v1/simulation/reset", { method: "POST" }); await refreshSeaShieldBackend(); }
+-export async function updateBackendIncident(id: string, status: Incident["status"], notes = "") {
+-  const backendStatus: Record<Incident["status"], string> = { open: "NEW", investigating: "INVESTIGATING", contained: "CONTAINED", closed: "RESOLVED" };
+-  await request(`/api/v1/incidents/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ status: backendStatus[status], investigation_notes: notes }) });
++const backendStatus: Record<Incident["status"], string> = { open: "NEW", investigating: "INVESTIGATING", contained: "CONTAINED", closed: "RESOLVED" };
++export async function updateBackendIncident(id: string, patch: { status?: Incident["status"]; severity?: Severity; assignee?: string }, actor?: string) {
++  const body = {
++    ...(patch.status ? { status: backendStatus[patch.status] } : {}),
++    ...(patch.severity ? { severity: patch.severity.toUpperCase() } : {}),
++    ...(patch.assignee ? { assigned_operator: patch.assignee } : {}),
++    ...(actor ? { actor } : {}),
++  };
++  await request(`/api/v1/incidents/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(body) });
++  await refreshSeaShieldBackend();
++}
++export async function createBackendIncident(input: { title: string; vesselId: string; system: string; severity: Severity; assignee: string }, createdBy?: string) {
++  const created = await request<ApiIncident>("/api/v1/incidents", {
++    method: "POST",
++    body: JSON.stringify({ title: input.title, vessel_id: input.vesselId, system: input.system, severity: input.severity.toUpperCase(), assigned_operator: input.assignee, created_by: createdBy }),
++  });
++  await refreshSeaShieldBackend();
++  return mapIncident(created);
++}
++export async function addBackendIncidentNote(id: string, body: string, author: string) {
++  await request(`/api/v1/incidents/${encodeURIComponent(id)}/notes`, { method: "POST", body: JSON.stringify({ body, author }) });
++  await refreshSeaShieldBackend();
++}
++export async function acknowledgeBackendEvent(id: string, acknowledgedBy: string) {
++  await request(`/api/security-events/${encodeURIComponent(id)}/acknowledge`, { method: "POST", body: JSON.stringify({ acknowledged_by: acknowledgedBy }) });
+   await refreshSeaShieldBackend();
+ }
+ let socket: WebSocket | undefined;
+diff --git a/src/lib/seashield/services.ts b/src/lib/seashield/services.ts
+index 1030869..a9dcdd9 100644
+--- a/src/lib/seashield/services.ts
++++ b/src/lib/seashield/services.ts
+@@ -1,5 +1,12 @@
+ import * as store from "./store";
+-import { resetBackendSimulation, runBackendScenario, updateBackendIncident } from "./backend";
++import {
++  acknowledgeBackendEvent,
++  addBackendIncidentNote,
++  createBackendIncident,
++  resetBackendSimulation,
++  runBackendScenario,
++  updateBackendIncident,
++} from "./backend";
+ import type {
+   AccessRecord,
+   Camera,
+@@ -15,11 +22,16 @@ import type {
+ /**
+  * Service layer. The UI must only talk to these abstractions.
+  *
+- * Prototype V1: every call resolves against the local simulation store.
+- * Later: each method becomes an HTTP call to the Python/FastAPI backend
+- * (FastAPI → security engine → PostgreSQL) without UI changes.
++ * Reads come from the local store, which is hydrated from the V1.8 FastAPI backend.
++ * Writes are applied to the store immediately (optimistic) and then persisted to the
++ * backend; the next refresh replaces the optimistic state with the server's. When the
++ * backend is unreachable the local change is kept so the prototype still works offline.
+  */
+ 
++const operatorName = () => store.getState().operator.name;
++const persist = (label: string, call: Promise<unknown>) =>
++  void call.catch((error: unknown) => console.warn(`[SeaShield] ${label} not persisted`, error));
++
+ const scope = <T extends { vesselId: string }>(rows: T[], vesselId: string | "all") =>
+   vesselId === "all" ? rows : rows.filter((r) => r.vesselId === vesselId);
+ 
+@@ -42,7 +54,10 @@ export const sensorService = {
+ export const eventService = {
+   list: (vesselId: string | "all" = "all", limit = 100): SecurityEvent[] =>
+     scope(store.getState().events, vesselId).slice(0, limit),
+-  acknowledge: (id: string) => store.acknowledgeEvent(id),
++  acknowledge: (id: string) => {
++    store.acknowledgeEvent(id);
++    persist("event acknowledgement", acknowledgeBackendEvent(id, operatorName()));
++  },
+ };
+ 
+ export const incidentService = {
+@@ -56,14 +71,25 @@ export const incidentService = {
+     system: string;
+     severity: Severity;
+     assignee: string;
+-  }) => store.createIncident(input),
++  }) => {
++    // Backend allocates the incident ID; fall back to a local incident when offline.
++    void createBackendIncident(input, operatorName()).catch((error: unknown) => {
++      console.warn("[SeaShield] incident not persisted, keeping local copy", error);
++      store.createIncident(input);
++    });
++  },
+   setStatus: (id: string, status: IncidentStatus) => {
+     store.setIncidentStatus(id, status);
+-    void updateBackendIncident(id, status).catch(() => undefined);
++    persist("incident status", updateBackendIncident(id, { status }, operatorName()));
++  },
++  update: (id: string, patch: Partial<Pick<Incident, "severity" | "assignee" | "status">>) => {
++    store.updateIncident(id, patch);
++    persist("incident update", updateBackendIncident(id, patch, operatorName()));
++  },
++  addNote: (id: string, body: string, author: string) => {
++    store.addIncidentNote(id, body, author);
++    persist("incident note", addBackendIncidentNote(id, body, author));
+   },
+-  update: (id: string, patch: Partial<Pick<Incident, "severity" | "assignee" | "status">>) =>
+-    store.updateIncident(id, patch),
+-  addNote: (id: string, body: string, author: string) => store.addIncidentNote(id, body, author),
+ };
+ 
+ export const securityService = {
+-- 
+2.43.0
+
