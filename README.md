@@ -1,4 +1,4 @@
-# SeaShield — Maritime Security Operations Platform
+# SeaShield SaaS — Maritime Security Operations Platform
 
 **SeaShield** is a desktop-oriented maritime security operations prototype designed for commercial cargo vessels and shipping companies.
 
