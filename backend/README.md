@@ -11,6 +11,24 @@ From the `backend` directory:
 ..\.venv\Scripts\python.exe -m alembic upgrade head
 ..\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --port 8000
 ```
+
+## Docker (development)
+
+An optional alternative to the host workflow above, which keeps working unchanged. Only the backend runs in Docker; the frontend still runs on the host with `npm run dev` and reaches the API at its default `http://localhost:8000`.
+
+From the repository root:
+
+```bash
+docker compose up --build        # build the image and start the backend
+docker compose down              # stop and remove the container (data is kept)
+```
+
+- **Startup:** the container runs `alembic upgrade head`, then Uvicorn on `0.0.0.0:8000` inside the container. Compose publishes it on `127.0.0.1:8000` only, so it is not reachable from other machines. Code changes need `docker compose up --build`; there is no auto-reload.
+- **Database:** SQLite at `/data/seashield.db` inside the named Docker volume `seashield-data`. It survives `docker compose down` and container rebuilds. It is separate from the host's `backend/seashield.db`. `docker compose down -v` deletes the volume and all its data.
+- **Environment variables:** `DATABASE_URL` is set by `compose.yaml`. `AUTH_REQUIRED`, `SESSION_SECRET`, `DEMO_USER_EMAIL` and `DEMO_USER_PASSWORD` are passed through from your shell, or from a root `.env` file, which Docker Compose reads automatically. When unset, the backend's defaults apply, exactly as on the host (authentication off). `AUTH_REQUIRED=true` requires `SESSION_SECRET`.
+- **Secrets:** the image is built from `backend/` only, and `backend/.dockerignore` excludes `.env*` and `*.db`, so no local secrets or databases are copied into it.
+- **Port 8000:** stop any host-run backend first; only one of them can use the port.
+
 # SeaShield V1.5 Backend
 
 Simulation-only Python backend for the SeaShield maritime security desktop prototype. It generates fictional telemetry in memory and never connects to real vessels, cameras, networks, credentials, or security infrastructure.

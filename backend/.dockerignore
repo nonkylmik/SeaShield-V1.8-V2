@@ -1,0 +1,12 @@
+# Keep secrets, local databases and caches out of the image (**/ matches at any depth).
+**/.env
+**/.env.*
+**/*.db
+**/*.db-journal
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+.venv
+venv
+Dockerfile
+.dockerignore
