@@ -1,6 +1,6 @@
 # SeaShield V1.7 Backend
 
-Simulation-only FastAPI backend for SeaShield. Security events persist through SQLAlchemy in PostgreSQL, with SQLite as a local fallback. It does not connect to real vessels, cameras, networks, or security infrastructure.
+Simulation-only FastAPI backend for SeaShield. Data persists through SQLAlchemy in SQLite (`backend/seashield.db` by default; a Docker volume when run with Docker). PostgreSQL support exists in the code but has not yet been validated against a running PostgreSQL server. It does not connect to real vessels, cameras, networks, or security infrastructure.
 
 ## Run
 
@@ -54,7 +54,7 @@ py -3.12 -m venv .venv
 python -m pip install -r SeaShield\backend\requirements.txt
 ```
 
-Python 3.12+ is required by the project target. PostgreSQL and authentication are intentionally not included.
+Python 3.12+ is required by the project target.
 
 ## Run
 

@@ -463,7 +463,7 @@ Future development may include:
 
 * Advanced event correlation
 * AI-assisted detection
-* PostgreSQL-based persistence
+* PostgreSQL persistence validated against a running server (driver and schema support already exist in code)
 * Real vessel/edge-server communication
 * Real CCTV integrations
 * Network monitoring integrations
