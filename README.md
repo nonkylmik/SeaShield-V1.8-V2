@@ -94,7 +94,7 @@ The UI reaches the backend only through `src/lib/seashield/services.ts` and `src
 
 - **Base URL:** `VITE_API_URL`, defaulting to `http://localhost:8000`. It is read at build time (`import.meta.env`), so changing it requires restarting `npm run dev` or rebuilding.
 - **REST:** the client loads vessels, cameras, security events, incidents, safety rounds and findings from `/api/v1/...` and `/api/security-events`, and calls `/health` to show the backend status.
-- **WebSocket:** the client connects to `ws://<API host>/ws/security`. Any message from the server triggers a debounced refresh of backend data. If the connection drops, the UI marks the backend as degraded and reconnects with exponential backoff.
+- **WebSocket:** the client connects to `/ws/security` on the same host as `VITE_API_URL`, and the scheme follows that URL: `http://` becomes `ws://`, and `https://` becomes `wss://`. With the default `http://localhost:8000`, the connection is unencrypted (`ws://localhost:8000/ws/security`). The scheme comes from `VITE_API_URL`, not the page's own protocol. The backend does not terminate TLS itself: Uvicorn serves plain HTTP and WebSocket. A `wss://` connection would therefore need a TLS-terminating proxy in front of the backend, which this project does not include. Any message from the server triggers a debounced refresh of backend data. If the connection drops, the UI marks the backend as degraded and reconnects with exponential backoff.
 - **Server messages** include `security_event`, `security_event_created`, `incident_created`, `incident_updated`, `security_score_changed`, `vessel_status_changed`, `simulation_status`, `notification`, `event_acknowledged` and the `safety_round_*` / `safety_checkpoint_updated` / `safety_finding_*` types.
 - **CORS:** the backend allows `http(s)://localhost` and `http(s)://127.0.0.1` origins on any port, with credentials.
 
@@ -211,6 +211,23 @@ python -m uvicorn app.main:app --reload --port 8000
 - Run `alembic upgrade head` before the first start, so the database is migration-tracked.
 - Uvicorn listens on `http://127.0.0.1:8000`.
 - `backend/.venv/` is gitignored.
+
+#### Existing databases created without migrations
+
+The backend's startup code creates any missing tables (`Base.metadata.create_all`) but does not record an Alembic version. A database created by starting the backend before ever running `alembic upgrade head` is therefore unversioned. Earlier versions of this README gave exactly that sequence. On such a database, `alembic upgrade head` fails at the first migration with `table security_events already exists`. No data is lost, but the database stays unversioned.
+
+The recovery procedure below applies **only** to a database that was created by the **current** startup code and whose schema you have verified against a database built by `alembic upgrade head`:
+
+1. **Back up first.** Stop the backend and copy the database file (for example `backend/seashield.db`) somewhere safe before stamping or migrating.
+2. **Verify the schema.** Compare it with a reference database created by `alembic upgrade head` on a fresh, empty file (set `DATABASE_URL` to a scratch path). Matching table and column names alone is **not** sufficient. The comparison must also cover column types, nullability, primary keys, unique and foreign-key constraints, indexes, and any other schema details.
+   - The known, expected differences are these: uniqueness is enforced by unique indexes instead of `UNIQUE` constraints, columns lack SQL default values, and there are two extra indexes (`ix_incidents_severity`, `ix_incidents_type`).
+   - Any other difference means the procedure does not apply.
+3. **Stamp, then confirm.** Run `python -m alembic stamp head`, then `python -m alembic upgrade head`. The upgrade should report nothing to apply.
+4. **Check the backend.** Start it and check `GET /health`.
+
+> **Never stamp an unknown or older schema to `head`.** Stamping only records a version; it does not change tables. If the database came from an older version of SeaShield, or if you are unsure of its origin or whether its schema matches, **stop and investigate** instead of guessing a revision. Keep the backup until the database is confirmed working.
+
+The Docker workflow is not affected: it runs migrations before the first start on its own volume.
 
 #### Option B: Docker Compose
 
