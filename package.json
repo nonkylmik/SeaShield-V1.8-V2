@@ -11,7 +11,8 @@
     "preview": "vite preview",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "test:scripts": "node --test scripts/assert-dev-port.test.mjs"
+    "test:scripts": "node --test scripts/assert-dev-port.test.mjs",
+    "test:unit": "node --test \"src/**/*.test.mjs\""
   },
   "overrides": {
     "rolldown": "1.2.1"
