@@ -29,7 +29,7 @@ Backend — run from `backend/`. Provisional minimum Python 3.12 (not yet declar
 
 Startup and Alembic write to the configured DB (startup seeds demo data). When only verifying, set `DATABASE_URL=sqlite:///<scratch path>.db` so the local `seashield.db` is untouched.
 
-Frontend — run from repo root with **npm** (`package-lock.json`). `bun.lock`/`bunfig.toml` are Lovable leftovers pending removal. Don't switch package managers, or delete or regenerate either lockfile, without approval.
+Frontend — run from repo root with **npm**; `package-lock.json` is the only lockfile. Don't switch package managers or regenerate the lockfile without approval.
 - `npm run dev` — Vite on `http://localhost:8080`, also bound to all network interfaces.
 - `npm run build` — Cloudflare Worker build into `.output/` (gitignored). Does not type-check.
 - `npx tsc --noEmit` — type-check.
