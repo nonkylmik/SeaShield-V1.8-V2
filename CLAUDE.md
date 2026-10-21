@@ -29,7 +29,7 @@ Backend — run from `backend/`. Provisional minimum Python 3.12 (not yet declar
 
 Startup and Alembic write to the configured DB (startup seeds demo data). When only verifying, set `DATABASE_URL=sqlite:///<scratch path>.db` so the local `seashield.db` is untouched.
 
-Frontend — run from repo root with **npm**; `package-lock.json` is the only lockfile. Don't switch package managers or regenerate the lockfile without approval.
+Frontend — run from repo root with **npm**; `package-lock.json` is the only lockfile. Don't switch package managers or regenerate the lockfile without approval. Node `^22.22.2 || ^24.15.0 || >=26.0.0` (`engines` in `package.json`; `.nvmrc` selects 24). That floor comes from the `jsdom` dev dependency used by `test:unit`; the app itself needs only Node 22.12+. npm does not enforce `engines` by default.
 - `npm run dev` — Vite on `http://127.0.0.1:8080` only (also reachable as `http://localhost:8080`; strict port, and `predev` runs `scripts/assert-dev-port.mjs` first, failing if the port is in use).
 - `npm run build` — Cloudflare Worker build into `.output/` (gitignored). Does not type-check.
 - `npx tsc --noEmit` — type-check.

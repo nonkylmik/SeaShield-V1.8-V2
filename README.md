@@ -368,6 +368,8 @@ http://localhost:8000
 
 ## 2. Start the V2 Frontend
 
+Requires Node.js `^22.22.2 || ^24.15.0 || >=26.0.0` (the `engines` field in `package.json`); `.nvmrc` selects Node 24.
+
 From the project root:
 
 ```bash
