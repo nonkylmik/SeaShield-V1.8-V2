@@ -132,7 +132,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   );
 }
 
-function TopBar({ onSignOut }: { onSignOut?: () => Promise<void> }) {
+function TopBar({ onSignOut }: { onSignOut?: (() => Promise<void>) | undefined }) {
   const vessels = useSeaShield((s) => s.vessels);
   const selected = useSeaShield((s) => s.selectedVesselId);
   const notifications = useSeaShield((s) => s.notifications);
