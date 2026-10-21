@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 import sqlalchemy as sa
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import JSON
@@ -12,9 +12,10 @@ from db.database import Base
 
 class SecurityEventRecord(Base):
     __tablename__ = "security_events"
-    __table_args__ = {"extend_existing": True}
+    # Uniqueness is a table-level constraint plus a plain index, matching the migrations.
+    __table_args__ = (sa.UniqueConstraint("event_id"), {"extend_existing": True})
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    event_id: Mapped[str] = mapped_column(String(100), unique=True, index=True)
+    event_id: Mapped[str] = mapped_column(String(100), index=True)
     timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     event_type: Mapped[str] = mapped_column(String(100), index=True)
     category: Mapped[str] = mapped_column(String(30), index=True)
@@ -23,7 +24,7 @@ class SecurityEventRecord(Base):
     title: Mapped[str | None] = mapped_column(String(200), nullable=True)
     description: Mapped[str] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(20), default="OPEN")
-    confidence: Mapped[float | None] = mapped_column(nullable=True)
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     scenario: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
     vessel_id: Mapped[str] = mapped_column(String(100), index=True)
     event_metadata: Mapped[dict[str, Any]] = mapped_column("metadata", JSON().with_variant(JSONB, "postgresql"), default=dict)
@@ -32,9 +33,9 @@ class SecurityEventRecord(Base):
 
 class VesselRecord(Base):
     __tablename__ = "vessels"
-    __table_args__ = {"extend_existing": True}
+    __table_args__ = (sa.UniqueConstraint("vessel_id"), {"extend_existing": True})
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    vessel_id: Mapped[str] = mapped_column(String(100), unique=True, index=True)
+    vessel_id: Mapped[str] = mapped_column(String(100), index=True)
     name: Mapped[str] = mapped_column(String(160), nullable=False)
     imo: Mapped[str] = mapped_column(String(100), nullable=False)
     base_score: Mapped[int] = mapped_column(Integer, default=100)
@@ -47,9 +48,9 @@ class VesselRecord(Base):
 
 class IncidentRecord(Base):
     __tablename__ = "incidents"
-    __table_args__ = {"extend_existing": True}
+    __table_args__ = (sa.UniqueConstraint("incident_id"), {"extend_existing": True})
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    incident_id: Mapped[str] = mapped_column(String(100), unique=True, index=True)
+    incident_id: Mapped[str] = mapped_column(String(100), index=True)
     vessel_id: Mapped[str] = mapped_column(String(100), index=True)
     type: Mapped[str] = mapped_column(String(160), index=True)
     title: Mapped[str] = mapped_column(String(200), nullable=False)
