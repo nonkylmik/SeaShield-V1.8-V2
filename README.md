@@ -520,3 +520,9 @@ The V2 interface was partially developed with [Lovable](https://lovable.dev), wh
 **Status:** Active prototype development
 
 The project is currently focused on strengthening backend/frontend integration, simulation, event correlation, testing, and the foundation required for future maritime security integrations.
+
+---
+
+## License
+
+This project is proprietary. Copyright 2026 nonkylmik. All rights reserved. See the [LICENSE](LICENSE) file for details.
