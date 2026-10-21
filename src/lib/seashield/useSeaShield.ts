@@ -1,15 +1,12 @@
-import { useEffect, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
+import { cachedSelector } from "./cachedSelector";
 import { getState, subscribe, tick } from "./store";
 import type { SeaShieldState } from "./types";
 
-const snapshot = () => getState();
-
 export function useSeaShield<T>(selector: (s: SeaShieldState) => T): T {
-  return useSyncExternalStore(
-    subscribe,
-    () => selector(snapshot()),
-    () => selector(snapshot()),
-  );
+  const [select] = useState(() => cachedSelector<SeaShieldState, T>());
+  const getSnapshot = () => select(getState(), selector);
+  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
 
 /** Ambient telemetry loop — mounted once by the app shell. */
