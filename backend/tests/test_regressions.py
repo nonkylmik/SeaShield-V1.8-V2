@@ -37,19 +37,19 @@ def test_injection_targets_selected_vessel_and_persists_unique_events(client):
     test_client, sessions = client
     first = test_client.post(
         "/api/v1/simulation/inject",
-        json={"vessel_id": "ocean-sentinel", "event_type": "FIRE_ALARM"},
+        json={"vessel_id": "calypso", "event_type": "FIRE_ALARM"},
     )
     second = test_client.post(
         "/api/v1/simulation/inject",
-        json={"vessel_id": "ocean-sentinel", "event_type": "FIRE_ALARM"},
+        json={"vessel_id": "calypso", "event_type": "FIRE_ALARM"},
     )
     assert first.status_code == second.status_code == 200
-    assert first.json()["event"]["vessel_id"] == "ocean-sentinel"
+    assert first.json()["event"]["vessel_id"] == "calypso"
     assert first.json()["event"]["event_id"] != second.json()["event"]["event_id"]
     with sessions() as database:
         assert get_event(database, first.json()["event"]["event_id"]) is not None
         assert get_event(database, second.json()["event"]["event_id"]) is not None
-        calypso_history = list_security_score_history(database, "ocean-sentinel")
+        calypso_history = list_security_score_history(database, "calypso")
         untouched_history = list_security_score_history(database, "baltic-guardian")
     assert [entry.score for entry in calypso_history] == [52, 72, 92]
     assert len(untouched_history) == 1
