@@ -10,13 +10,49 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
+from db.migration_helpers import ExpectedTable, create_index_if_missing, verify_existing_tables
+
 revision: str = "20260903_0001"
 down_revision: str | Sequence[str] | None = None
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
+SECURITY_EVENTS = ExpectedTable(
+    "security_events",
+    {
+        "id": ("integer", False),
+        "event_id": ("string", False),
+        "timestamp": ("datetime", False),
+        "event_type": ("string", False),
+        "severity": ("string", False),
+        "source": ("string", False),
+        "title": ("string", True),
+        "description": ("string", False),
+        "status": ("string", False),
+        "confidence": ("float", True),
+        "scenario": ("string", True),
+        "vessel_id": ("string", False),
+        "metadata": ("json", False),
+        "created_at": ("datetime", False),
+    },
+    unique=(("event_id",),),
+)
+INDEXES = {
+    "ix_security_events_event_id": ["event_id"],
+    "ix_security_events_timestamp": ["timestamp"],
+    "ix_security_events_event_type": ["event_type"],
+    "ix_security_events_severity": ["severity"],
+    "ix_security_events_scenario": ["scenario"],
+    "ix_security_events_vessel_id": ["vessel_id"],
+}
+
 
 def upgrade() -> None:
+    if verify_existing_tables([SECURITY_EVENTS]):
+        # Created earlier by application startup (create_all): keep it and add only missing indexes.
+        for index_name, column_names in INDEXES.items():
+            create_index_if_missing(index_name, "security_events", column_names)
+        return
     op.create_table(
         "security_events",
         sa.Column("id", sa.Integer(), nullable=False),

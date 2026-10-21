@@ -200,3 +200,358 @@ def test_incident_index_migration_keeps_indexes_that_already_exist(tmp_path):
     indexes = read_schema(database_path)["incidents"]["indexes"]
     assert sum(1 for name, *_ in indexes if name == "ix_incidents_type") == 1
     assert INCIDENT_INDEXES_0006 <= incident_index_names(database_path)
+
+
+# --- Existing databases created by earlier SeaShield versions (fixtures/migrations/*.sql) -------------------
+
+FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures" / "migrations"
+
+# Differences that remain after upgrading an older database, deferred to later stages. Tables created by
+# application startup have no server-side defaults and a unique index instead of constraint + index; safety
+# tables first created by d64be3a or cc93f8c keep their original nullability, VARCHAR lengths and indexes.
+STARTUP_DEFAULTS = {("server_default", table, column) for table, column in MIGRATION_ONLY_SERVER_DEFAULTS}
+STARTUP_UNIQUE_INDEXES = {("index_shape", "incidents", "incident_id"), ("index_shape", "vessels", "vessel_id")}
+STARTUP_SECURITY_EVENTS = {("index_shape", "security_events", "event_id")}
+D64BE3A_SAFETY = {("nullability", "safety_rounds", "description")}
+CC93F8C_SAFETY = {
+    ("nullability", "safety_checkpoints", "category"),
+    ("nullability", "safety_checkpoints", "notes"),
+    ("nullability", "safety_checkpoints", "sequence"),
+    ("nullability", "safety_findings", "assigned_to"),
+    ("nullability", "safety_findings", "location"),
+    ("nullability", "safety_findings", "resolution_notes"),
+    ("nullability", "safety_rounds", "planned_start"),
+    ("nullability", "safety_rounds", "round_type"),
+    ("nullability", "safety_rounds", "title"),
+    ("type", "safety_checkpoints", "checkpoint_id"),
+    ("type", "safety_findings", "checkpoint_id"),
+    ("type", "safety_findings", "finding_id"),
+    ("missing_index", "safety_checkpoints", "created_at"),
+    ("missing_index", "safety_rounds", "assigned_to"),
+}
+HISTORICAL_FIXTURES = {
+    "tracked_0003_96622fb": set(),
+    "tracked_0003_d64be3a": D64BE3A_SAFETY,
+    "tracked_0003_cc93f8c": D64BE3A_SAFETY,
+    "tracked_0004_c70d429": D64BE3A_SAFETY,
+    "tracked_0005_88872b3": set(),
+    "unversioned_96622fb": STARTUP_DEFAULTS | STARTUP_UNIQUE_INDEXES | STARTUP_SECURITY_EVENTS,
+    "unversioned_d64be3a_to_88872b3": STARTUP_DEFAULTS | STARTUP_UNIQUE_INDEXES | STARTUP_SECURITY_EVENTS | D64BE3A_SAFETY,
+    "unversioned_cc93f8c_to_88872b3": STARTUP_DEFAULTS | STARTUP_UNIQUE_INDEXES | STARTUP_SECURITY_EVENTS | CC93F8C_SAFETY,
+    "unversioned_88872b3": STARTUP_DEFAULTS | STARTUP_UNIQUE_INDEXES | STARTUP_SECURITY_EVENTS,
+    "committed_96622fb": STARTUP_DEFAULTS | STARTUP_UNIQUE_INDEXES,
+    "committed_d64be3a": STARTUP_DEFAULTS | STARTUP_UNIQUE_INDEXES | D64BE3A_SAFETY,
+    "committed_cc93f8c": STARTUP_DEFAULTS | STARTUP_UNIQUE_INDEXES | CC93F8C_SAFETY,
+}
+
+APP_SMOKE_TEST = """
+import app.main as main
+from fastapi.testclient import TestClient
+with TestClient(main.app) as client:
+    created = client.post('/api/v1/safety-rounds', json={'vessel_id': 'calypso', 'round_type': 'Security Round'})
+    assert created.status_code == 201, created.text
+    assert client.post(f"/api/v1/safety-rounds/{created.json()['round_id']}/start").status_code == 200
+    assert client.post('/api/v1/simulation/inject', json={'vessel_id': 'calypso', 'event_type': 'FIRE_ALARM'}).status_code == 200
+    assert client.get('/api/v1/incidents').status_code == 200
+    assert client.get('/api/v1/safety-findings').status_code == 200
+"""
+
+
+def load_fixture(name: str, database_path: Path) -> None:
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.executescript((FIXTURES_DIR / f"{name}.sql").read_text(encoding="utf-8"))
+    finally:
+        connection.close()
+
+
+def rows_by_id(database_path: Path) -> dict:
+    connection = sqlite3.connect(database_path)
+    try:
+        tables = [row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name != 'alembic_version'")]
+        result = {}
+        for table in tables:
+            cursor = connection.execute(f"SELECT * FROM {table}")
+            names = [description[0] for description in cursor.description]
+            result[table] = {row[0]: dict(zip(names, row)) for row in cursor.fetchall()}
+        return result
+    finally:
+        connection.close()
+
+
+def changed_values(before: dict, after: dict) -> list[tuple]:
+    changes = []
+    for table, rows in before.items():
+        for row_id, row in rows.items():
+            new_row = after.get(table, {}).get(row_id)
+            if new_row is None:
+                changes.append((table, row_id, "<row removed>", None, None))
+                continue
+            changes.extend((table, row_id, column, value, new_row.get(column)) for column, value in row.items() if new_row.get(column) != value)
+    return changes
+
+
+def is_safety_round_description_backfill(change: tuple, before: dict) -> bool:
+    # Migration 0004 fills an empty round description from the round's notes. No SeaShield version creates
+    # rounds in that state (each stores `description or notes`), so this only affects hand-edited data.
+    table, row_id, column, old, new = change
+    notes = before.get("safety_rounds", {}).get(row_id, {}).get("notes")
+    return table == "safety_rounds" and column == "description" and old == "" and bool(notes) and new == notes
+
+
+def schema_drift(reference: dict, upgraded: dict) -> set[tuple]:
+    drift = set()
+    for table, reference_table in reference.items():
+        if table not in upgraded:
+            drift.add(("missing_table", table, ""))
+            continue
+        columns = {column[0]: column for column in upgraded[table]["columns"]}
+        for name, column_type, not_null, default, _ in reference_table["columns"]:
+            if name not in columns:
+                drift.add(("missing_column", table, name))
+                continue
+            if columns[name][1] != column_type:
+                drift.add(("type", table, name))
+            if columns[name][2] != not_null:
+                drift.add(("nullability", table, name))
+            if columns[name][3] != default:
+                drift.add(("server_default", table, name))
+        reference_indexes = {(index[1], index[2]) for index in reference_table["indexes"]}
+        upgraded_indexes = {(index[1], index[2]) for index in upgraded[table]["indexes"]}
+        upgraded_columns = {columns_ for columns_, _ in upgraded_indexes}
+        for index_columns, _ in reference_indexes - upgraded_indexes:
+            drift.add(("index_shape" if index_columns in upgraded_columns else "missing_index", table, ",".join(index_columns)))
+    return drift
+
+
+def database_content(database_path: Path) -> list[str]:
+    connection = sqlite3.connect(database_path)
+    try:
+        return [line for line in connection.iterdump() if "alembic_version" not in line]
+    finally:
+        connection.close()
+
+
+def alembic_versions(database_path: Path) -> list[str]:
+    connection = sqlite3.connect(database_path)
+    try:
+        if not connection.execute("SELECT count(*) FROM sqlite_master WHERE name = 'alembic_version'").fetchone()[0]:
+            return []
+        return [row[0] for row in connection.execute("SELECT version_num FROM alembic_version")]
+    finally:
+        connection.close()
+
+
+@pytest.fixture(scope="module")
+def fresh_head_schema(tmp_path_factory) -> dict:
+    database_path = tmp_path_factory.mktemp("reference") / "fresh.db"
+    upgrade(database_path)
+    return read_schema(database_path)
+
+
+@pytest.mark.parametrize("fixture_name", sorted(HISTORICAL_FIXTURES))
+def test_historical_database_upgrades_without_losing_data(tmp_path, fresh_head_schema, fixture_name):
+    database_path = tmp_path / f"{fixture_name}.db"
+    load_fixture(fixture_name, database_path)
+    before = rows_by_id(database_path)
+
+    upgrade(database_path)
+
+    assert alembic_versions(database_path) == [HEAD_REVISION]
+    after = rows_by_id(database_path)
+    unexpected = [change for change in changed_values(before, after) if not is_safety_round_description_backfill(change, before)]
+    assert unexpected == []
+    connection = sqlite3.connect(database_path)
+    try:
+        assert connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+        assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
+    finally:
+        connection.close()
+
+    upgraded_schema = read_schema(database_path)
+    assert schema_drift(fresh_head_schema, upgraded_schema) == HISTORICAL_FIXTURES[fixture_name]
+    for table, column in UNIQUE_COLUMNS.items():
+        assert any(columns == (column,) and unique for _, columns, unique, _ in upgraded_schema[table]["indexes"]), table
+
+    # Application startup's create_all must find nothing left to create.
+    engine = create_engine(f"sqlite:///{database_path.as_posix()}")
+    Base.metadata.create_all(engine)
+    engine.dispose()
+    assert read_schema(database_path) == upgraded_schema
+
+    smoke = subprocess.run(
+        [sys.executable, "-c", APP_SMOKE_TEST],
+        cwd=BACKEND_DIR,
+        env={**os.environ, "DATABASE_URL": f"sqlite:///{database_path.as_posix()}"},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert smoke.returncode == 0, smoke.stderr[-2000:]
+
+
+def insert_orphaned_finding(database_path: Path) -> None:
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute(
+            "INSERT INTO safety_findings (finding_id, round_id, checkpoint_id, vessel_id, title, description, location, severity, status, created_by, assigned_to, resolution_notes, created_at, updated_at) "
+            "SELECT 'FND-ORPHAN', round_id, 'CP-DOES-NOT-EXIST', vessel_id, 'Orphaned finding', '', '', 'LOW', 'OPEN', 'Operator', 'Operator', '', created_at, updated_at FROM safety_rounds LIMIT 1"
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+
+def test_orphaned_finding_stops_upgrade_until_an_operator_fixes_it(tmp_path):
+    database_path = tmp_path / "orphan.db"
+    load_fixture("tracked_0004_c70d429", database_path)
+    insert_orphaned_finding(database_path)
+    content_before = database_content(database_path)
+
+    result = run_alembic(database_path, "upgrade", "head")
+
+    assert result.returncode != 0
+    assert "1 orphaned references exist" in result.stdout + result.stderr
+    assert alembic_versions(database_path) == ["20261001_0004"]
+    assert any("FND-ORPHAN" in line for line in database_content(database_path))
+    assert [line for line in database_content(database_path) if line.startswith("INSERT")] == [line for line in content_before if line.startswith("INSERT")]
+
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute("UPDATE safety_findings SET checkpoint_id = NULL WHERE finding_id = 'FND-ORPHAN'")
+        connection.commit()
+    finally:
+        connection.close()
+    upgrade(database_path)
+    assert alembic_versions(database_path) == [HEAD_REVISION]
+
+
+def test_orphaned_finding_is_left_untouched_when_the_foreign_key_already_exists(tmp_path):
+    # Databases created by 88872b3's startup already have the foreign key, so migration 0005 has nothing to add.
+    database_path = tmp_path / "orphan_with_key.db"
+    load_fixture("unversioned_88872b3", database_path)
+    insert_orphaned_finding(database_path)
+    before = rows_by_id(database_path)
+
+    upgrade(database_path)
+
+    after = rows_by_id(database_path)
+    assert [change for change in changed_values(before, after) if not is_safety_round_description_backfill(change, before)] == []
+    connection = sqlite3.connect(database_path)
+    try:
+        violations = connection.execute("PRAGMA foreign_key_check('safety_findings')").fetchall()
+    finally:
+        connection.close()
+    assert len(violations) == 1
+
+
+def recreate_table(connection: sqlite3.Connection, table: str, create_sql: str) -> None:
+    original_columns = [row[1] for row in connection.execute(f"PRAGMA table_info('{table}')")]
+    connection.execute(f"ALTER TABLE {table} RENAME TO {table}_original")
+    connection.execute(create_sql)
+    new_columns = {row[1] for row in connection.execute(f"PRAGMA table_info('{table}')")}
+    columns = ", ".join(column for column in original_columns if column in new_columns)
+    connection.execute(f"INSERT INTO {table} ({columns}) SELECT {columns} FROM {table}_original")
+    connection.execute(f"DROP TABLE {table}_original")
+
+
+SECURITY_EVENTS_COLUMNS = (
+    "id INTEGER NOT NULL PRIMARY KEY, event_id VARCHAR(100) NOT NULL UNIQUE, timestamp DATETIME NOT NULL, event_type VARCHAR(100) NOT NULL, "
+    "category VARCHAR(30) NOT NULL, severity VARCHAR(20) NOT NULL, source VARCHAR(160) NOT NULL, title VARCHAR(200), description TEXT NOT NULL, "
+    "status VARCHAR(20) NOT NULL, confidence FLOAT, scenario VARCHAR(100), vessel_id VARCHAR(100) NOT NULL, metadata JSON NOT NULL, created_at DATETIME NOT NULL"
+)
+UNSUPPORTED_SCHEMAS = {
+    "missing_columns": (
+        "unversioned_88872b3", "security_events",
+        f"CREATE TABLE security_events ({SECURITY_EVENTS_COLUMNS.replace(', confidence FLOAT, scenario VARCHAR(100)', '')})",
+        "column 'confidence' is missing",
+    ),
+    "incompatible_type": (
+        "unversioned_88872b3", "security_events",
+        f"CREATE TABLE security_events ({SECURITY_EVENTS_COLUMNS.replace('confidence FLOAT', 'confidence TEXT')})",
+        "column 'confidence' has type TEXT, expected a float column",
+    ),
+    "incompatible_nullability": (
+        "unversioned_88872b3", "security_events",
+        f"CREATE TABLE security_events ({SECURITY_EVENTS_COLUMNS.replace('description TEXT NOT NULL', 'description TEXT')})",
+        "column 'description' is nullable, expected NOT NULL",
+    ),
+    "missing_unique_key": (
+        "committed_96622fb", "vessels",
+        "CREATE TABLE vessels (id INTEGER NOT NULL PRIMARY KEY, vessel_id VARCHAR(100) NOT NULL, name VARCHAR(160) NOT NULL, imo VARCHAR(100) NOT NULL, "
+        "base_score INTEGER NOT NULL, score INTEGER NOT NULL, status VARCHAR(30) NOT NULL, last_communication DATETIME NOT NULL, created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL)",
+        "no unique constraint or unique index on ['vessel_id']",
+    ),
+    "missing_foreign_key": (
+        "committed_96622fb", "incident_event_links",
+        "CREATE TABLE incident_event_links (id INTEGER NOT NULL PRIMARY KEY, incident_id VARCHAR(100) NOT NULL, event_id VARCHAR(100) NOT NULL, "
+        "created_at DATETIME NOT NULL, CONSTRAINT uq_incident_event_link UNIQUE (incident_id, event_id))",
+        "no foreign key ['incident_id'] -> incidents['incident_id']",
+    ),
+}
+
+
+@pytest.mark.parametrize("case", sorted(UNSUPPORTED_SCHEMAS))
+def test_incompatible_existing_table_stops_its_migration_before_it_changes_anything(tmp_path, case):
+    # Only the rejecting migration is guaranteed to make no changes. In these cases it is also the first migration
+    # of the run (0001 for the unversioned fixture, 0003 for the fixture at 0002), so the whole database must be
+    # unchanged. When earlier migrations succeed first, their changes remain and the recorded version shows them.
+    fixture_name, table, create_sql, expected_problem = UNSUPPORTED_SCHEMAS[case]
+    database_path = tmp_path / f"{case}.db"
+    load_fixture(fixture_name, database_path)
+    connection = sqlite3.connect(database_path)
+    try:
+        recreate_table(connection, table, create_sql)
+        connection.commit()
+    finally:
+        connection.close()
+    versions_before, content_before = alembic_versions(database_path), database_content(database_path)
+
+    result = run_alembic(database_path, "upgrade", "head")
+
+    output = result.stdout + result.stderr
+    assert result.returncode != 0
+    assert f"'{table}'" in output and expected_problem in output and "this migration made no changes" in output
+    assert alembic_versions(database_path) == versions_before
+    assert database_content(database_path) == content_before
+
+
+def test_extra_user_column_is_kept(tmp_path):
+    database_path = tmp_path / "extra_column.db"
+    load_fixture("unversioned_88872b3", database_path)
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute("ALTER TABLE vessels ADD COLUMN local_note TEXT")
+        connection.execute("UPDATE vessels SET local_note = 'kept by the upgrade'")
+        connection.commit()
+    finally:
+        connection.close()
+
+    upgrade(database_path)
+
+    connection = sqlite3.connect(database_path)
+    try:
+        assert connection.execute("SELECT local_note FROM vessels").fetchall() == [("kept by the upgrade",)]
+    finally:
+        connection.close()
+
+
+def test_partly_existing_database_creates_only_the_missing_tables(tmp_path, fresh_head_schema):
+    database_path = tmp_path / "partial.db"
+    load_fixture("unversioned_96622fb", database_path)
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute("DROP TABLE simulation_runs")
+        connection.execute("DROP TABLE security_score_history")
+        connection.commit()
+    finally:
+        connection.close()
+    before = rows_by_id(database_path)
+
+    upgrade(database_path)
+
+    assert alembic_versions(database_path) == [HEAD_REVISION]
+    assert changed_values(before, rows_by_id(database_path)) == []
+    upgraded = read_schema(database_path)
+    for table in ("simulation_runs", "security_score_history"):
+        assert upgraded[table] == fresh_head_schema[table]
