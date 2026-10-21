@@ -4,7 +4,13 @@ import { onlineText, utcTime } from "@/lib/seashield/format";
 import { cn } from "@/lib/utils";
 
 /** Simulated feed placeholder — no real video stream is used in Prototype V1. */
-export function CameraTile({ camera, vesselName }: { camera: Camera; vesselName?: string | undefined }) {
+export function CameraTile({
+  camera,
+  vesselName,
+}: {
+  camera: Camera;
+  vesselName?: string | undefined;
+}) {
   const offline = camera.state === "offline";
   const degraded = camera.state === "degraded";
 
@@ -34,7 +40,9 @@ export function CameraTile({ camera, vesselName }: { camera: Camera; vesselName?
           )}
         </div>
         <div className="absolute top-1.5 left-1.5 flex items-center gap-1.5">
-          <span className="label-mono bg-background/80 px-1.5 py-0.5 text-foreground">{camera.label}</span>
+          <span className="label-mono bg-background/80 px-1.5 py-0.5 text-foreground">
+            {camera.label}
+          </span>
         </div>
         <div className="absolute top-1.5 right-1.5 flex items-center gap-1">
           {camera.recording ? (

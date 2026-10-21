@@ -1,7 +1,13 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useSeaShield } from "@/lib/seashield/useSeaShield";
 import { elapsed, onlineText, stateColor } from "@/lib/seashield/format";
-import { PageHeader, Panel, ScoreBar, SimBanner, StatusDot } from "@/components/seashield/primitives";
+import {
+  PageHeader,
+  Panel,
+  ScoreBar,
+  SimBanner,
+  StatusDot,
+} from "@/components/seashield/primitives";
 import { now } from "@/lib/seashield/store";
 import { cn } from "@/lib/utils";
 
@@ -96,11 +102,21 @@ function FleetView() {
                         <span className="tabular">{v.securityScore}</span>
                       </div>
                     </td>
-                    <td className={cn("tabular px-3 py-2", online === cams.length ? "text-secure" : "text-caution")}>
+                    <td
+                      className={cn(
+                        "tabular px-3 py-2",
+                        online === cams.length ? "text-secure" : "text-caution",
+                      )}
+                    >
                       {online}/{cams.length}
                     </td>
                     <td className={cn("label-mono px-3 py-2", stateColor[v.cyber])}>{v.cyber}</td>
-                    <td className={cn("tabular px-3 py-2", open.length ? "text-warning" : "text-muted-foreground")}>
+                    <td
+                      className={cn(
+                        "tabular px-3 py-2",
+                        open.length ? "text-warning" : "text-muted-foreground",
+                      )}
+                    >
                       {open.length}
                     </td>
                     <td className={cn("tabular px-3 py-2", onlineText[v.network])}>
