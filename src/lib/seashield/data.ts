@@ -382,6 +382,7 @@ export function buildSeedState(): SeaShieldState {
     selectedVesselId: "all",
     operator: { name: "R. Vance", role: "Senior Security Operator", shift: "12:00–00:00Z" },
     connection: { edge: "online", backend: "online", mode: "SIMULATION V1" },
+    dataSource: "seed",
   };
 }
 

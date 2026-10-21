@@ -73,6 +73,7 @@ type BackendPayload = {
 export function hydrateFromBackend(payload: BackendPayload) {
   const seeded = buildSeedState();
   if (payload.vessels?.length) {
+    state.dataSource = "backend";
     const fixtureOwner = new Map<string, string>();
     const slotByVessel = new Map(
       [...payload.vessels]
