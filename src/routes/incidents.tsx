@@ -20,7 +20,8 @@ export const Route = createFileRoute("/incidents")({
       { property: "og:title", content: "Incident Management — SeaShield" },
       {
         property: "og:description",
-        content: "Investigate correlated maritime security incidents with timeline and operator notes.",
+        content:
+          "Investigate correlated maritime security incidents with timeline and operator notes.",
       },
     ],
   }),
@@ -71,11 +72,13 @@ function IncidentsView() {
           <table className="w-full text-xs">
             <thead className="sticky top-0 bg-panel-header">
               <tr className="border-b border-border">
-                {["Ref", "Sev", "Title", "Vessel", "System", "Status", "Assignee", "Opened"].map((h) => (
-                  <th key={h} className="label-mono px-3 py-1.5 text-left font-medium">
-                    {h}
-                  </th>
-                ))}
+                {["Ref", "Sev", "Title", "Vessel", "System", "Status", "Assignee", "Opened"].map(
+                  (h) => (
+                    <th key={h} className="label-mono px-3 py-1.5 text-left font-medium">
+                      {h}
+                    </th>
+                  ),
+                )}
               </tr>
             </thead>
             <tbody>
@@ -92,8 +95,12 @@ function IncidentsView() {
                   <td className="px-3 py-1.5">
                     <SeverityTag severity={i.severity} />
                   </td>
-                  <td className={cn("px-3 py-1.5 font-medium", severityText[i.severity])}>{i.title}</td>
-                  <td className="px-3 py-1.5 whitespace-nowrap text-muted-foreground">{name(i.vesselId)}</td>
+                  <td className={cn("px-3 py-1.5 font-medium", severityText[i.severity])}>
+                    {i.title}
+                  </td>
+                  <td className="px-3 py-1.5 whitespace-nowrap text-muted-foreground">
+                    {name(i.vesselId)}
+                  </td>
                   <td className="px-3 py-1.5 text-muted-foreground">{i.system}</td>
                   <td className="label-mono px-3 py-1.5">{i.status}</td>
                   <td className="px-3 py-1.5 text-muted-foreground">{i.assignee}</td>
@@ -123,7 +130,9 @@ function IncidentsView() {
                 <Field label="Severity">
                   <select
                     value={selected.severity}
-                    onChange={(e) => incidentService.update(selected.id, { severity: e.target.value as Severity })}
+                    onChange={(e) =>
+                      incidentService.update(selected.id, { severity: e.target.value as Severity })
+                    }
                     className="h-7 w-full rounded-sm border border-input bg-background px-1 font-mono text-xs"
                   >
                     {SEVERITIES.map((s) => (
@@ -136,7 +145,9 @@ function IncidentsView() {
                 <Field label="Status">
                   <select
                     value={selected.status}
-                    onChange={(e) => incidentService.setStatus(selected.id, e.target.value as IncidentStatus)}
+                    onChange={(e) =>
+                      incidentService.setStatus(selected.id, e.target.value as IncidentStatus)
+                    }
                     className="h-7 w-full rounded-sm border border-input bg-background px-1 font-mono text-xs"
                   >
                     {STATUSES.map((s) => (
@@ -149,7 +160,9 @@ function IncidentsView() {
                 <Field label="Assignee">
                   <select
                     value={selected.assignee}
-                    onChange={(e) => incidentService.update(selected.id, { assignee: e.target.value })}
+                    onChange={(e) =>
+                      incidentService.update(selected.id, { assignee: e.target.value })
+                    }
                     className="h-7 w-full rounded-sm border border-input bg-background px-1 font-mono text-xs"
                   >
                     {ASSIGNEES.map((s) => (
@@ -195,7 +208,10 @@ function IncidentsView() {
               <Section title="Investigation notes">
                 <ul className="space-y-2">
                   {selected.notes.map((n) => (
-                    <li key={n.id} className="border border-border bg-secondary/30 px-2 py-1.5 text-xs">
+                    <li
+                      key={n.id}
+                      className="border border-border bg-secondary/30 px-2 py-1.5 text-xs"
+                    >
                       <div className="label-mono normal-case">
                         {n.author} · {utcStamp(n.ts)}
                       </div>
@@ -301,13 +317,18 @@ function CreateForm({ onDone }: { onDone: () => void }) {
           onChange={(e) => setSystem(e.target.value)}
           className="h-8 w-full rounded-sm border border-input bg-background px-1 font-mono text-xs"
         >
-          {["CCTV", "Access Control", "Sensors / Safety", "OT / IT Network", "GPS / AIS", "Vessel Systems"].map(
-            (s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ),
-          )}
+          {[
+            "CCTV",
+            "Access Control",
+            "Sensors / Safety",
+            "OT / IT Network",
+            "GPS / AIS",
+            "Vessel Systems",
+          ].map((s) => (
+            <option key={s} value={s}>
+              {s}
+            </option>
+          ))}
         </select>
       </label>
       <label>

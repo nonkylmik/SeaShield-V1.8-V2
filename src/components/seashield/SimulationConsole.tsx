@@ -78,14 +78,16 @@ export function SimulationConsole({ className }: { className?: string }) {
               {log.length === 0 ? (
                 <tr>
                   <td className="px-3 py-3 text-muted-foreground">
-                    No simulated events triggered yet. Fire a scenario to see events, correlation and
-                    incidents update across the console.
+                    No simulated events triggered yet. Fire a scenario to see events, correlation
+                    and incidents update across the console.
                   </td>
                 </tr>
               ) : (
                 log.map((l) => (
                   <tr key={l.id} className="border-b border-border/60">
-                    <td className="tabular w-16 px-3 py-1.5 text-muted-foreground">{utcTime(l.ts)}</td>
+                    <td className="tabular w-16 px-3 py-1.5 text-muted-foreground">
+                      {utcTime(l.ts)}
+                    </td>
                     <td className="px-2 py-1.5 font-medium">{l.scenario}</td>
                     <td className="px-3 py-1.5 text-right text-muted-foreground">{l.outcome}</td>
                   </tr>

@@ -78,7 +78,11 @@ function CamerasView() {
         ))}
         <div className="ml-auto flex gap-2">
           <Metric label="Feeds in view" value={rows.length} />
-          <Metric label="Online" value={`${online}/${rows.length}`} tone={online === rows.length ? "secure" : "caution"} />
+          <Metric
+            label="Online"
+            value={`${online}/${rows.length}`}
+            tone={online === rows.length ? "secure" : "caution"}
+          />
         </div>
       </div>
       <div className="min-h-0 flex-1 overflow-auto p-2">

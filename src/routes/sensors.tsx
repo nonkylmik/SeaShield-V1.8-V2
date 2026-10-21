@@ -59,7 +59,11 @@ function SensorsView() {
             value={rows.filter((r) => r.state === "offline").length}
             tone={rows.some((r) => r.state === "offline") ? "warning" : "secure"}
           />
-          <Metric label="Active alarms" value={alarms.length} tone={alarms.length ? "critical" : "secure"} />
+          <Metric
+            label="Active alarms"
+            value={alarms.length}
+            tone={alarms.length ? "critical" : "secure"}
+          />
         </div>
 
         <div className="flex items-center gap-2">
@@ -102,7 +106,10 @@ function SensorsView() {
               {rows.map((s) => (
                 <tr
                   key={s.id}
-                  className={cn("border-b border-border/50 hover:bg-accent/40", s.alarm && "bg-critical/10")}
+                  className={cn(
+                    "border-b border-border/50 hover:bg-accent/40",
+                    s.alarm && "bg-critical/10",
+                  )}
                 >
                   <td className="px-3 py-1.5">
                     <StatusDot state={s.state} pulse={s.alarm} />
@@ -110,11 +117,20 @@ function SensorsView() {
                   <td className="label-mono px-3 py-1.5">{s.kind}</td>
                   <td className="px-3 py-1.5">{s.location}</td>
                   <td className="px-3 py-1.5 text-muted-foreground">{name(s.vesselId)}</td>
-                  <td className={cn("tabular px-3 py-1.5", s.alarm ? "font-semibold text-critical" : "")}>
+                  <td
+                    className={cn(
+                      "tabular px-3 py-1.5",
+                      s.alarm ? "font-semibold text-critical" : "",
+                    )}
+                  >
                     {s.reading}
                   </td>
-                  <td className={cn("tabular px-3 py-1.5", onlineText[s.state])}>{s.state.toUpperCase()}</td>
-                  <td className="tabular px-3 py-1.5 text-muted-foreground">{s.uptime.toFixed(1)}%</td>
+                  <td className={cn("tabular px-3 py-1.5", onlineText[s.state])}>
+                    {s.state.toUpperCase()}
+                  </td>
+                  <td className="tabular px-3 py-1.5 text-muted-foreground">
+                    {s.uptime.toFixed(1)}%
+                  </td>
                 </tr>
               ))}
             </tbody>

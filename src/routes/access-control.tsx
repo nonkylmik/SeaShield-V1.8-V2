@@ -36,7 +36,11 @@ function AccessView() {
   const access = useSeaShield((s) => s.access);
   const vessels = useSeaShield((s) => s.vessels);
   const rows = useMemo(
-    () => securityService.accessRecords(scope).slice().sort((a, b) => b.ts - a.ts),
+    () =>
+      securityService
+        .accessRecords(scope)
+        .slice()
+        .sort((a, b) => b.ts - a.ts),
     [scope, access],
   );
   const name = (id: string) => vessels.find((v) => v.id === id)?.name ?? id;
@@ -71,11 +75,24 @@ function AccessView() {
         </div>
 
         <div className="grid gap-2 xl:grid-cols-[1fr_18rem]">
-          <Panel title="Access event log" meta={`${rows.length} records`} className="max-h-[34rem]" scroll>
+          <Panel
+            title="Access event log"
+            meta={`${rows.length} records`}
+            className="max-h-[34rem]"
+            scroll
+          >
             <table className="w-full text-xs">
               <thead className="sticky top-0 bg-panel-header">
                 <tr className="border-b border-border">
-                  {["Timestamp", "Vessel", "Area", "Credential", "Holder", "Restricted", "Result"].map((h) => (
+                  {[
+                    "Timestamp",
+                    "Vessel",
+                    "Area",
+                    "Credential",
+                    "Holder",
+                    "Restricted",
+                    "Result",
+                  ].map((h) => (
                     <th key={h} className="label-mono px-3 py-1.5 text-left font-medium">
                       {h}
                     </th>
@@ -88,12 +105,16 @@ function AccessView() {
                     <td className="tabular px-3 py-1.5 whitespace-nowrap text-muted-foreground">
                       {utcStamp(r.ts)}
                     </td>
-                    <td className="px-3 py-1.5 whitespace-nowrap text-muted-foreground">{name(r.vesselId)}</td>
+                    <td className="px-3 py-1.5 whitespace-nowrap text-muted-foreground">
+                      {name(r.vesselId)}
+                    </td>
                     <td className="px-3 py-1.5">{r.area}</td>
                     <td className="tabular px-3 py-1.5">{r.credential}</td>
                     <td className="px-3 py-1.5 text-muted-foreground">{r.person}</td>
                     <td className="label-mono px-3 py-1.5">{r.restricted ? "yes" : "no"}</td>
-                    <td className={cn("label-mono px-3 py-1.5 font-semibold", RESULT_CLS[r.result])}>
+                    <td
+                      className={cn("label-mono px-3 py-1.5 font-semibold", RESULT_CLS[r.result])}
+                    >
                       {r.result}
                     </td>
                   </tr>
@@ -105,9 +126,14 @@ function AccessView() {
           <Panel title="Restricted areas" meta="simulated zones" scroll>
             <ul>
               {areas.map((a) => {
-                const violations = rows.filter((r) => r.area === a && r.result !== "authorized").length;
+                const violations = rows.filter(
+                  (r) => r.area === a && r.result !== "authorized",
+                ).length;
                 return (
-                  <li key={a} className="flex items-center justify-between border-b border-border/50 px-3 py-2 text-xs">
+                  <li
+                    key={a}
+                    className="flex items-center justify-between border-b border-border/50 px-3 py-2 text-xs"
+                  >
                     <span>{a}</span>
                     <span className={cn("tabular", violations ? "text-warning" : "text-secure")}>
                       {violations} violations

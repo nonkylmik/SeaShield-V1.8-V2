@@ -36,7 +36,9 @@ export function Panel({
           {actions}
         </header>
       ) : null}
-      <div className={cn("min-h-0 flex-1", scroll && "overflow-auto", bodyClassName)}>{children}</div>
+      <div className={cn("min-h-0 flex-1", scroll && "overflow-auto", bodyClassName)}>
+        {children}
+      </div>
     </section>
   );
 }
@@ -62,9 +64,7 @@ export function StatusDot({
   pulse?: boolean | undefined;
 }) {
   const cls =
-    state in stateDot
-      ? stateDot[state as SecurityState]
-      : onlineDot[state as OnlineState];
+    state in stateDot ? stateDot[state as SecurityState] : onlineDot[state as OnlineState];
   return (
     <span className="relative inline-flex size-2 items-center justify-center">
       <span className={cn("size-2 rounded-full", cls)} />
@@ -116,10 +116,19 @@ export function Metric({
 
 export function ScoreBar({ score }: { score: number }) {
   const tone =
-    score >= 86 ? "bg-secure" : score >= 72 ? "bg-caution" : score >= 55 ? "bg-warning" : "bg-critical";
+    score >= 86
+      ? "bg-secure"
+      : score >= 72
+        ? "bg-caution"
+        : score >= 55
+          ? "bg-warning"
+          : "bg-critical";
   return (
     <div className="h-1.5 w-full overflow-hidden rounded-full bg-secondary">
-      <div className={cn("h-full transition-all duration-500", tone)} style={{ width: `${score}%` }} />
+      <div
+        className={cn("h-full transition-all duration-500", tone)}
+        style={{ width: `${score}%` }}
+      />
     </div>
   );
 }
@@ -148,7 +157,8 @@ export function SimBanner({ text }: { text?: string | undefined }) {
   return (
     <div className="label-mono flex items-center gap-2 border border-signal/30 bg-signal/8 px-2.5 py-1 text-signal">
       <span className="size-1.5 rounded-full bg-signal animate-pulse-signal" />
-      {text ?? "Simulated data — Prototype V1. No real vessel, camera or network systems connected."}
+      {text ??
+        "Simulated data — Prototype V1. No real vessel, camera or network systems connected."}
     </div>
   );
 }

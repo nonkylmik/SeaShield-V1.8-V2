@@ -82,8 +82,8 @@ function SettingsView() {
           <Panel title="Simulation">
             <div className="space-y-3 p-3 text-xs">
               <p className="text-muted-foreground">
-                All vessels, cameras, sensors, network findings and security events in this build are
-                simulated. Nothing connects to real vessels, cameras, networks or security
+                All vessels, cameras, sensors, network findings and security events in this build
+                are simulated. Nothing connects to real vessels, cameras, networks or security
                 infrastructure, and event correlation is rule-based — not AI and not real threat
                 detection.
               </p>
@@ -115,13 +115,14 @@ function SettingsView() {
             <div className="space-y-2 p-3 text-xs text-muted-foreground">
               <p>
                 The interface is built as a full-screen, single-window operations console with no
-                marketing surfaces, so it can be wrapped as a native desktop application (Electron or
-                Tauri) for Windows and Linux workstations without UI changes.
+                marketing surfaces, so it can be wrapped as a native desktop application (Electron
+                or Tauri) for Windows and Linux workstations without UI changes.
               </p>
               <p>
-                UI components read data only through the service layer (vesselService, cameraService,
-                sensorService, eventService, incidentService, securityService), so switching from
-                simulated data to the FastAPI backend does not require rewriting the interface.
+                UI components read data only through the service layer (vesselService,
+                cameraService, sensorService, eventService, incidentService, securityService), so
+                switching from simulated data to the FastAPI backend does not require rewriting the
+                interface.
               </p>
             </div>
           </Panel>

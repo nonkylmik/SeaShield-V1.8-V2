@@ -3,7 +3,13 @@ import { useMemo } from "react";
 import { securityService } from "@/lib/seashield/services";
 import { useSeaShield } from "@/lib/seashield/useSeaShield";
 import { utcTime } from "@/lib/seashield/format";
-import { Metric, PageHeader, Panel, SeverityTag, SimBanner } from "@/components/seashield/primitives";
+import {
+  Metric,
+  PageHeader,
+  Panel,
+  SeverityTag,
+  SimBanner,
+} from "@/components/seashield/primitives";
 import { EventStream } from "@/components/seashield/EventStream";
 import type { CyberFinding } from "@/lib/seashield/types";
 
@@ -19,7 +25,8 @@ export const Route = createFileRoute("/cybersecurity")({
       { property: "og:title", content: "Cybersecurity Monitoring — SeaShield" },
       {
         property: "og:description",
-        content: "Rule-based, fully simulated cyber event monitoring for vessel IT and OT networks.",
+        content:
+          "Rule-based, fully simulated cyber event monitoring for vessel IT and OT networks.",
       },
     ],
   }),
@@ -73,7 +80,12 @@ function CyberView() {
           ))}
         </div>
 
-        <Panel title="Cyber findings" meta={`${rows.length} records`} className="max-h-[26rem]" scroll>
+        <Panel
+          title="Cyber findings"
+          meta={`${rows.length} records`}
+          className="max-h-[26rem]"
+          scroll
+        >
           <table className="w-full text-xs">
             <thead className="sticky top-0 bg-panel-header">
               <tr className="border-b border-border">
@@ -92,7 +104,9 @@ function CyberView() {
                     <SeverityTag severity={r.severity} />
                   </td>
                   <td className="label-mono px-3 py-1.5">{r.kind}</td>
-                  <td className="px-3 py-1.5 whitespace-nowrap text-muted-foreground">{name(r.vesselId)}</td>
+                  <td className="px-3 py-1.5 whitespace-nowrap text-muted-foreground">
+                    {name(r.vesselId)}
+                  </td>
                   <td className="px-3 py-1.5">{r.summary}</td>
                   <td className="tabular px-3 py-1.5 text-muted-foreground">{r.host}</td>
                   <td className="tabular px-3 py-1.5">{r.count}</td>
@@ -102,7 +116,12 @@ function CyberView() {
           </table>
         </Panel>
 
-        <Panel title="Correlated cyber event stream" meta="rule-based, not AI" className="min-h-72" scroll>
+        <Panel
+          title="Correlated cyber event stream"
+          meta="rule-based, not AI"
+          className="min-h-72"
+          scroll
+        >
           <EventStream limit={40} />
         </Panel>
       </div>

@@ -1,7 +1,13 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useSeaShield } from "@/lib/seashield/useSeaShield";
 import { elapsed, onlineText, stateColor } from "@/lib/seashield/format";
-import { PageHeader, Panel, ScoreBar, SimBanner, StatusDot } from "@/components/seashield/primitives";
+import {
+  PageHeader,
+  Panel,
+  ScoreBar,
+  SimBanner,
+  StatusDot,
+} from "@/components/seashield/primitives";
 import { now } from "@/lib/seashield/store";
 import { cn } from "@/lib/utils";
 
@@ -30,7 +36,11 @@ function VesselsIndex() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <PageHeader title="Vessel Security" subtitle="Select a vessel for full system breakdown" actions={<SimBanner />} />
+      <PageHeader
+        title="Vessel Security"
+        subtitle="Select a vessel for full system breakdown"
+        actions={<SimBanner />}
+      />
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-2 overflow-auto p-2 md:grid-cols-2 xl:grid-cols-4">
         {vessels.map((v) => (
           <Link key={v.id} to="/vessels/$vesselId" params={{ vesselId: v.id }} className="block">
@@ -43,11 +53,15 @@ function VesselsIndex() {
                   </div>
                   <StatusDot state={v.securityState} />
                 </div>
-                <div className="label-mono normal-case">{v.type} · {v.flag}</div>
+                <div className="label-mono normal-case">
+                  {v.type} · {v.flag}
+                </div>
                 <div>
                   <div className="flex items-baseline justify-between">
                     <span className="label-mono">Security score</span>
-                    <span className={cn("tabular text-lg font-semibold", stateColor[v.securityState])}>
+                    <span
+                      className={cn("tabular text-lg font-semibold", stateColor[v.securityState])}
+                    >
                       {v.securityScore}
                     </span>
                   </div>

@@ -223,12 +223,12 @@ export async function refreshSeaShieldBackend() {
 
 export async function listSafetyRounds(
   filters: {
-    vesselId?: string;
-    roundType?: string;
-    status?: string;
-    assignedTo?: string;
-    start?: string;
-    end?: string;
+    vesselId?: string | undefined;
+    roundType?: string | undefined;
+    status?: string | undefined;
+    assignedTo?: string | undefined;
+    start?: string | undefined;
+    end?: string | undefined;
     limit?: number;
     offset?: number;
   } = {},

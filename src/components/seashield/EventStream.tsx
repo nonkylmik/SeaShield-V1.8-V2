@@ -8,7 +8,10 @@ export function EventStream({ limit = 60 }: { limit?: number }) {
   const scope = useSeaShield((s) => s.selectedVesselId);
   const events = useSeaShield((s) => s.events);
   const vessels = useSeaShield((s) => s.vessels);
-  const rows = (scope === "all" ? events : events.filter((e) => e.vesselId === scope)).slice(0, limit);
+  const rows = (scope === "all" ? events : events.filter((e) => e.vesselId === scope)).slice(
+    0,
+    limit,
+  );
   const name = (id: string) => vessels.find((v) => v.id === id)?.name ?? id;
 
   return (
@@ -25,12 +28,16 @@ export function EventStream({ limit = 60 }: { limit?: number }) {
       <tbody>
         {rows.map((e) => (
           <tr key={e.id} className="border-b border-border/50 hover:bg-accent/40">
-            <td className="tabular px-3 py-1.5 whitespace-nowrap text-muted-foreground">{utcTime(e.ts)}</td>
+            <td className="tabular px-3 py-1.5 whitespace-nowrap text-muted-foreground">
+              {utcTime(e.ts)}
+            </td>
             <td className="px-3 py-1.5">
               <SeverityTag severity={e.severity} />
             </td>
             <td className="label-mono px-3 py-1.5">{e.category}</td>
-            <td className="px-3 py-1.5 whitespace-nowrap text-muted-foreground">{name(e.vesselId)}</td>
+            <td className="px-3 py-1.5 whitespace-nowrap text-muted-foreground">
+              {name(e.vesselId)}
+            </td>
             <td className="px-3 py-1.5">
               <span className={cn("font-medium", severityText[e.severity])}>{e.title}</span>
               <span className="ml-2 text-muted-foreground">{e.detail}</span>

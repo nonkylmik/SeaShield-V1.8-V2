@@ -33,6 +33,8 @@ const CHECKPOINT_STATUSES: SafetyCheckpointStatus[] = ["PASS", "WARNING", "FAIL"
 const FINDING_STATUSES: SafetyFindingStatus[] = ["OPEN", "IN_PROGRESS", "RESOLVED", "DISMISSED"];
 const SEVERITIES: SafetySeverity[] = ["INFO", "LOW", "MEDIUM", "HIGH", "CRITICAL"];
 
+const notCheckedStyle = "text-muted-foreground border-border";
+
 const statusStyle: Record<string, string> = {
   PLANNED: "text-muted-foreground border-border",
   IN_PROGRESS: "text-signal border-signal/40",
@@ -43,7 +45,7 @@ const statusStyle: Record<string, string> = {
   WARNING: "text-warning border-warning/40",
   FAIL: "text-critical border-critical/50",
   NOT_APPLICABLE: "text-muted-foreground border-border",
-  NOT_CHECKED: "text-muted-foreground border-border",
+  NOT_CHECKED: notCheckedStyle,
   OPEN: "text-critical border-critical/50",
   IN_PROGRESS_FINDING: "text-warning border-warning/40",
   RESOLVED: "text-secure border-secure/40",
@@ -57,7 +59,7 @@ const statusStyle: Record<string, string> = {
 
 function statusClass(status: string, finding = false) {
   const key = finding && status === "IN_PROGRESS" ? "IN_PROGRESS_FINDING" : status;
-  return statusStyle[key] ?? statusStyle.NOT_CHECKED;
+  return statusStyle[key] ?? notCheckedStyle;
 }
 
 function SafetyRoundsPage() {
