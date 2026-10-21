@@ -47,6 +47,15 @@ export function getState() {
   return state;
 }
 
+// The seed data the server renders. React reads it while hydrating (see useSeaShield) so the
+// first client render matches the server HTML even after backend data has arrived. A separate
+// copy, because hydrateFromBackend mutates the live state object in place.
+const hydrationState = buildSeedState();
+
+export function getHydrationState() {
+  return hydrationState;
+}
+
 type BackendPayload = {
   health: string;
   vessels?: Array<
@@ -73,6 +82,7 @@ type BackendPayload = {
 export function hydrateFromBackend(payload: BackendPayload) {
   const seeded = buildSeedState();
   if (payload.vessels?.length) {
+    state.dataSource = "backend";
     const fixtureOwner = new Map<string, string>();
     const slotByVessel = new Map(
       [...payload.vessels]

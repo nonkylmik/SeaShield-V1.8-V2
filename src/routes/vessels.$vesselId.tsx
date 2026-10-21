@@ -13,6 +13,7 @@ import {
 } from "@/components/seashield/primitives";
 import { CameraTile } from "@/components/seashield/CameraTile";
 import { now } from "@/lib/seashield/store";
+import { vesselView } from "@/lib/seashield/vesselView";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/vessels/$vesselId")({
@@ -49,7 +50,13 @@ function VesselDetail() {
     s.safetyFindings.filter((finding) => finding.vessel_id === vesselId),
   );
   const events = useSeaShield((s) => s.events.filter((e) => e.vesselId === vesselId).slice(0, 20));
+  const dataSource = useSeaShield((s) => s.dataSource);
+  const backend = useSeaShield((s) => s.connection.backend);
 
+  const view = vesselView({ found: vessel !== undefined, dataSource, backend });
+  if (view === "loading") {
+    return <p className="p-6 text-sm text-muted-foreground">Loading vessel data…</p>;
+  }
   if (!vessel) throw notFound();
   const t = now();
   const camsOnline = cameras.filter((c) => c.state === "online").length;

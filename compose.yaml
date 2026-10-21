@@ -1,0 +1,27 @@
+# Development only: runs the SeaShield backend in Docker. The frontend still runs on the host
+# (npm run dev). See "Docker (development)" in backend/README.md.
+services:
+  backend:
+    build: ./backend
+    ports:
+      # Published on the host's loopback only, matching the host workflow (http://localhost:8000).
+      - "127.0.0.1:8000:8000"
+    environment:
+      # SQLite in the named volume below, so data survives container recreation.
+      DATABASE_URL: sqlite:////data/seashield.db
+      # Passed through only when set in your shell (or a root .env); otherwise the backend's
+      # defaults apply, exactly as on the host.
+      AUTH_REQUIRED:
+      SESSION_SECRET:
+      DEMO_USER_EMAIL:
+      DEMO_USER_PASSWORD:
+    volumes:
+      - seashield-data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  seashield-data:

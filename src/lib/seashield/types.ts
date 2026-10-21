@@ -210,4 +210,6 @@ export interface SeaShieldState {
   selectedVesselId: string | "all";
   operator: { name: string; role: string; shift: string };
   connection: { edge: OnlineState; backend: OnlineState; mode: string };
+  /** "seed" until the first backend vessel list has been applied. */
+  dataSource: "seed" | "backend";
 }

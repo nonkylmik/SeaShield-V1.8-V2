@@ -24,7 +24,7 @@ import type {
  *
  * Prototype V1: every call resolves against the local simulation store.
  * Later: each method becomes an HTTP call to the Python/FastAPI backend
- * (FastAPI → security engine → PostgreSQL) without UI changes.
+ * (FastAPI → security engine → database) without UI changes.
  */
 
 const scope = <T extends { vesselId: string }>(rows: T[], vesselId: string | "all") =>

@@ -69,8 +69,8 @@ function SettingsView() {
                 </dd>
               </div>
               <div className="flex justify-between px-3 py-2">
-                <dt className="label-mono">Planned backend</dt>
-                <dd className="tabular">Python / FastAPI → PostgreSQL</dd>
+                <dt className="label-mono">Backend stack</dt>
+                <dd className="tabular">Python / FastAPI → SQLite (default)</dd>
               </div>
               <div className="flex justify-between px-3 py-2">
                 <dt className="label-mono">Data mode</dt>

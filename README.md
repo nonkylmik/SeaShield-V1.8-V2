@@ -368,6 +368,8 @@ http://localhost:8000
 
 ## 2. Start the V2 Frontend
 
+Requires Node.js `^22.22.2 || ^24.15.0 || >=26.0.0` (the `engines` field in `package.json`); `.nvmrc` selects Node 24.
+
 From the project root:
 
 ```bash
@@ -461,7 +463,7 @@ Future development may include:
 
 * Advanced event correlation
 * AI-assisted detection
-* PostgreSQL-based persistence
+* PostgreSQL persistence validated against a running server (driver and schema support already exist in code)
 * Real vessel/edge-server communication
 * Real CCTV integrations
 * Network monitoring integrations
@@ -520,3 +522,9 @@ The V2 interface was partially developed with [Lovable](https://lovable.dev), wh
 **Status:** Active prototype development
 
 The project is currently focused on strengthening backend/frontend integration, simulation, event correlation, testing, and the foundation required for future maritime security integrations.
+
+---
+
+## License
+
+This project is proprietary. Copyright 2026 nonkylmik. All rights reserved. See the [LICENSE](LICENSE) file for details.
