@@ -12,4 +12,9 @@ export default defineConfig({
     // nitro/vite builds from this
     server: { entry: "server" },
   },
+  // Dev server is pinned to 127.0.0.1:8080; `predev` (scripts/assert-dev-port.mjs) fails
+  // first if anything else holds the port, and strictPort stops Vite from switching ports.
+  vite: {
+    server: { host: "127.0.0.1", port: 8080, strictPort: true },
+  },
 });
