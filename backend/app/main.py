@@ -37,7 +37,7 @@ from db.repositories.safety_repository import (
     update_safety_finding,
 )
 from db.repositories.security_repository import append_security_score, latest_security_score
-from db.repositories.vessel_repository import get_vessel_record, list_vessel_records, to_vessel_model, upsert_vessel_record
+from db.repositories.vessel_repository import get_vessel_record, list_vessel_records, record_vessel_communication, to_vessel_model, upsert_vessel_record
 from models.events import EventCategory, SecurityEvent, Severity
 from models.incidents import Incident, IncidentCreate, IncidentNoteCreate, IncidentStatus, IncidentUpdate
 from models.safety_rounds import SafetyCheckpointPatch, SafetyCheckpointStatus, SafetyFindingCreate, SafetyFindingUpdate, SafetyRoundCreate
@@ -178,10 +178,15 @@ def commit_with_engine_sync(db: Session) -> None:
             sync_engine_from_db(db, commit=False)
             db.commit()
     except Exception:
-        db.rollback()
-        with engine.deferred_notifications(publish=False), SessionLocal() as recovery:
-            sync_engine_from_db(recovery)
+        rollback_and_resync_engine(db)
         raise
+
+
+def rollback_and_resync_engine(db: Session) -> None:
+    """Discard the session's uncommitted changes and rebuild the engine from committed state, without notifying."""
+    db.rollback()
+    with engine.deferred_notifications(publish=False), SessionLocal() as recovery:
+        sync_engine_from_db(recovery)
 
 
 def create_safety_event_record(
@@ -209,7 +214,13 @@ def create_safety_event_record(
         status=event_status,
         metadata={"source": "safety_round", **(metadata or {})},
     )
-    return create_event(db, event, "safety-rounds", commit=commit)
+    # The event and the vessel's communication time commit together (here, or in the caller's transaction).
+    record = create_event(db, event, "safety-rounds", commit=False)
+    record_vessel_communication(db, vessel_id, event.timestamp, commit=False)
+    if commit:
+        db.commit()
+        db.refresh(record)
+    return record
 
 
 def seed_safety_demo_data(db: Session) -> None:
@@ -411,22 +422,31 @@ def persist_tick(db: Session):
 def persist_result(db: Session, result, scenario: str | None):
     if result is None:
         return None
-    create_event_record(
-        db,
-        event_id=result.event.event_id,
-        timestamp=result.event.timestamp,
-        vessel_id=result.event.vessel_id,
-        event_type=result.event.event_type,
-        category=result.event.category.value,
-        severity=result.event.severity.value,
-        source=result.event.source,
-        description=result.event.description,
-        status=result.event.status.value,
-        title=result.event.title,
-        confidence=result.event.confidence,
-        scenario=scenario,
-        metadata=result.event.metadata,
-    )
+    # The event and the vessel's communication time commit together; on failure neither is kept and the engine
+    # drops the event it already holds in memory.
+    try:
+        create_event_record(
+            db,
+            event_id=result.event.event_id,
+            timestamp=result.event.timestamp,
+            vessel_id=result.event.vessel_id,
+            event_type=result.event.event_type,
+            category=result.event.category.value,
+            severity=result.event.severity.value,
+            source=result.event.source,
+            description=result.event.description,
+            status=result.event.status.value,
+            title=result.event.title,
+            confidence=result.event.confidence,
+            scenario=scenario,
+            metadata=result.event.metadata,
+            commit=False,
+        )
+        record_vessel_communication(db, result.event.vessel_id, result.event.timestamp, commit=False)
+        db.commit()
+    except Exception:
+        rollback_and_resync_engine(db)
+        raise
     for vessel in engine.vessels:
         upsert_vessel_record(db, vessel_id=vessel.id, name=vessel.name, imo=vessel.imo, base_score=vessel.base_score, score=vessel.score, status=vessel.status)
         latest_score = latest_security_score(db, vessel.id)
@@ -486,6 +506,7 @@ async def post_security_event(payload: SecurityEventCreate, db: Session = Depend
         if get_event(db, payload.event_id) is None:
             raise
         raise HTTPException(status_code=409, detail="Event ID already exists") from exc
+    record_vessel_communication(db, record.vessel_id, record.timestamp, commit=False)
     commit_with_engine_sync(db)
     await broadcast_status_message("security_event_created", {"event_id": record.event_id, "event_type": record.event_type, "severity": record.severity})
     return event_response(record)

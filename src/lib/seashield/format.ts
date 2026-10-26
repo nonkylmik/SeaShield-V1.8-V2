@@ -24,6 +24,11 @@ export function elapsed(from: number, to: number) {
   return `${Math.floor(s / 86400)}d ${Math.floor((s % 86400) / 3600)}h`;
 }
 
+/** Age of the last communication, e.g. "4m 12s ago"; "—" when it is unknown, never "just now". */
+export function commsAge(lastComms: number | null, nowMs: number, suffix = ""): string {
+  return lastComms === null ? "—" : `${elapsed(lastComms, nowMs)}${suffix}`;
+}
+
 export const severityText: Record<Severity, string> = {
   critical: "text-critical",
   high: "text-warning",

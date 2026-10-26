@@ -24,6 +24,7 @@ def create_event_record(
     confidence: float | None = None,
     scenario: str | None = None,
     metadata: dict | None = None,
+    commit: bool = True,
 ) -> SecurityEventRecord:
     existing = get_event_record(db, event_id)
     if existing is not None:
@@ -44,8 +45,11 @@ def create_event_record(
         event_metadata=metadata or {},
     )
     db.add(record)
-    db.commit()
-    db.refresh(record)
+    if commit:
+        db.commit()
+        db.refresh(record)
+    else:
+        db.flush()
     return record
 
 

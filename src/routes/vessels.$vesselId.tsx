@@ -1,7 +1,7 @@
 import { createFileRoute, Link, notFound } from "@tanstack/react-router";
 import { ArrowLeft } from "lucide-react";
 import { useSeaShield } from "@/lib/seashield/useSeaShield";
-import { elapsed, onlineText, severityText, stateColor, utcTime } from "@/lib/seashield/format";
+import { commsAge, onlineText, severityText, stateColor, utcTime } from "@/lib/seashield/format";
 import {
   Metric,
   PageHeader,
@@ -12,6 +12,7 @@ import {
   StatusDot,
 } from "@/components/seashield/primitives";
 import { CameraTile } from "@/components/seashield/CameraTile";
+import { freshnessNow } from "@/lib/seashield/freshness";
 import { now } from "@/lib/seashield/store";
 import { vesselView } from "@/lib/seashield/vesselView";
 import type { SecurityState } from "@/lib/seashield/types";
@@ -59,7 +60,7 @@ function VesselDetail() {
     return <p className="p-6 text-sm text-muted-foreground">Loading vessel data…</p>;
   }
   if (!vessel) throw notFound();
-  const t = now();
+  const t = freshnessNow(dataSource, now(), Date.now());
   const camsOnline = cameras.filter((c) => c.state === "online").length;
   const sensorsOnline = sensors.filter((s) => s.state === "online").length;
 
@@ -274,7 +275,7 @@ function VesselDetail() {
 
           <Panel
             title="Vessel event log"
-            meta={`comms ${elapsed(vessel.lastComms, t)} ago`}
+            meta={`comms ${commsAge(vessel.lastComms, t, " ago")}`}
             className="max-h-72"
             scroll
           >

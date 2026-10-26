@@ -3,7 +3,7 @@ import { useMemo } from "react";
 import { AlertTriangle, ClipboardCheck, ShieldCheck } from "lucide-react";
 import { securityService } from "@/lib/seashield/services";
 import { useSeaShield } from "@/lib/seashield/useSeaShield";
-import { elapsed, severityText, stateColor, utcTime } from "@/lib/seashield/format";
+import { commsAge, severityText, stateColor, utcTime } from "@/lib/seashield/format";
 import {
   Metric,
   PageHeader,
@@ -15,6 +15,7 @@ import {
 } from "@/components/seashield/primitives";
 import { EventStream } from "@/components/seashield/EventStream";
 import { SimulationConsole } from "@/components/seashield/SimulationConsole";
+import { freshnessNow } from "@/lib/seashield/freshness";
 import { now } from "@/lib/seashield/store";
 import { cn } from "@/lib/utils";
 
@@ -46,7 +47,8 @@ function Dashboard() {
   const cyber = useSeaShield((s) => s.cyber);
   const s = useMemo(() => securityService.fleetSummary(scope), [scope, vessels, incidents, cyber]);
   const activeIncidents = incidents.filter((i) => i.status !== "closed").slice(0, 6);
-  const t = now();
+  const dataSource = useSeaShield((s) => s.dataSource);
+  const t = freshnessNow(dataSource, now(), Date.now());
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -175,7 +177,7 @@ function Dashboard() {
                         {v.securityScore}
                       </span>
                       <span className="tabular w-14 text-right text-[10px] text-muted-foreground">
-                        {elapsed(v.lastComms, t)}
+                        {commsAge(v.lastComms, t)}
                       </span>
                     </Link>
                   </li>

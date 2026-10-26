@@ -50,8 +50,35 @@ def upsert_vessel_record(
         record.base_score = base_score
         record.score = score
         record.status = status
-        record.last_communication = last_communication or datetime.now(timezone.utc)
+        # Score and status updates are not communication: only an explicit timestamp changes it.
+        if last_communication is not None:
+            record.last_communication = last_communication
         record.updated_at = datetime.now(timezone.utc)
+    if commit:
+        db.commit()
+        db.refresh(record)
+    else:
+        db.flush()
+    return record
+
+
+def _as_utc(value: datetime) -> datetime:
+    # SQLite returns stored timestamps without a zone; they are stored in UTC.
+    return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+
+
+def record_vessel_communication(db: Session, vessel_id: str, at: datetime, *, commit: bool = True) -> VesselRecord | None:
+    """Record that a security event from the vessel arrived at `at`.
+
+    The timestamp only moves forward (a backfilled event never rewinds it) and is clamped to the current time (a
+    future-dated event cannot make the vessel look fresher). Unknown vessels are ignored.
+    """
+    record = get_vessel_record(db, vessel_id)
+    if record is None:
+        return None
+    at = min(_as_utc(at), datetime.now(timezone.utc))
+    if record.last_communication is None or at > _as_utc(record.last_communication):
+        record.last_communication = at
     if commit:
         db.commit()
         db.refresh(record)
