@@ -1045,9 +1045,10 @@ async def simulation_stop():
 async def simulation_reset():
     engine.reset()
     with SessionLocal() as db:
-        resolve_all_open_events(db)
-        close_open_incident_records(db, status=IncidentStatus.RESOLVED.value, note="Closed by simulation reset.")
-        sync_engine_from_db(db)
+        # One transaction: resolving events, closing open incidents and the recalculated scores commit together.
+        resolve_all_open_events(db, commit=False)
+        close_open_incident_records(db, status=IncidentStatus.RESOLVED.value, reason="Closed by simulation reset", actor="System", commit=False)
+        commit_with_engine_sync(db)
     await broadcast_status_message("simulation_status", {"scenario": engine.scenarios.name, "status": engine.scenarios.status.value, "index": engine.scenarios.index})
     await broadcast_status_message("notification", {"title": "Simulation reset", "message": "The simulation has been reset.", "severity": "INFO"})
     return simulation_status()
