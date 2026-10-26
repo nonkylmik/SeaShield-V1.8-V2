@@ -134,13 +134,24 @@ def update_incident_record(
     return record
 
 
-def close_open_incident_records(db: Session, *, status: str, note: str) -> int:
-    records = list(db.scalars(select(IncidentRecord).where(IncidentRecord.status != "RESOLVED")).all())
+OPEN_INCIDENT_STATUSES = ("NEW", "INVESTIGATING", "CONTAINED")
+
+
+def close_open_incident_records(db: Session, *, status: str, reason: str, actor: str, commit: bool = True) -> int:
+    """Close incidents that are still open and record each closure in the activity timeline.
+
+    Closed incidents (RESOLVED, FALSE POSITIVE) are left untouched, and investigation notes are never modified.
+    """
+    records = list(db.scalars(select(IncidentRecord).where(IncidentRecord.status.in_(OPEN_INCIDENT_STATUSES))).all())
+    now = datetime.now(timezone.utc)
     for record in records:
+        db.add(IncidentActivityRecord(incident_id=record.incident_id, text=f"{reason}: status {record.status} → {status}.", actor=actor))
         record.status = status
-        record.investigation_notes = note
-        record.updated_at = datetime.now(timezone.utc)
-    db.commit()
+        record.updated_at = now
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     return len(records)
 
 

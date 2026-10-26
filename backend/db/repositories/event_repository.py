@@ -101,9 +101,10 @@ def set_event_status(db: Session, event_ids: list[str], status: str) -> int:
     return result.rowcount
 
 
-def resolve_all_open_events(db: Session) -> int:
+def resolve_all_open_events(db: Session, *, commit: bool = True) -> int:
     result = db.execute(update(SecurityEventRecord).where(SecurityEventRecord.status != "RESOLVED").values(status="RESOLVED"))
-    db.commit()
+    if commit:
+        db.commit()
     return result.rowcount
 
 
