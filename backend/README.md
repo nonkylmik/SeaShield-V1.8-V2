@@ -90,9 +90,12 @@ API docs are available at `http://localhost:8000/docs`.
 - `GET /api/v1/incidents/{incident_id}`
 - `PATCH /api/v1/incidents/{incident_id}`
 - `GET /api/v1/simulation/status`
+- `GET /api/v1/simulation/log?limit=40`
 - `POST /api/v1/simulation/start` with `{ "scenario": "cyber|physical|systems" }`
 - `POST /api/v1/simulation/next`
 - `POST /api/v1/simulation/pause`, `/resume`, `/stop`, `/reset`
+
+`GET /api/v1/simulation/log` lists what the simulation recorded, newest first: events from scenario steps and manual injections (not safety-round reports or events ingested over REST), each with `scenario_label`, `status` and the `incident_ids` it was correlated into. The UI's simulation console shows this log; a failed injection records nothing, so it has no entry (the UI reports the failure separately). Reset resolves logged events but keeps them.
 
 ### Vessel security status
 

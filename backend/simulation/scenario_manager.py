@@ -28,6 +28,9 @@ class Scenario:
     steps: tuple[ScenarioStep, ...]
 
 
+# Scenario tag of events injected one at a time from the simulation console.
+MANUAL_INJECTION = "manual-injection"
+
 SCENARIOS = {
     "cyber-intrusion": Scenario("Cyber Intrusion Simulation", "calypso", (
         ScenarioStep("UNKNOWN_DEVICE", EventCategory.CYBER, Severity.HIGH, "Network Monitor", "Unknown device detected."),
