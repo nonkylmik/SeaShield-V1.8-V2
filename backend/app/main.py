@@ -17,6 +17,7 @@ from db.models import IncidentRecord, VesselRecord
 from db.repositories.event_repository import acknowledge_event, acknowledged_event_ids, create_event_record, delete_event_record, list_event_records, resolve_all_open_events, resolve_safety_finding_events, set_event_status
 from db.repositories.incident_repository import add_incident_activity, add_incident_note, close_open_incident_records, create_incident_record, get_incident_record, get_linked_incident_ids, get_related_event_ids, list_incident_activity, list_incident_notes, list_incident_records, next_incident_id, update_incident_record
 from db.repositories.safety_repository import (
+    CLOSED_FINDING_STATUSES,
     cancel_safety_round,
     complete_safety_round,
     create_safety_finding,
@@ -923,7 +924,7 @@ async def update_safety_finding_endpoint(finding_id: str, payload: SafetyFinding
     record = get_safety_finding(db, finding_id)
     if record is None:
         raise HTTPException(status_code=404, detail="Safety finding not found")
-    was_resolved = record.status == "RESOLVED"
+    previous_status = record.status
     updated = update_safety_finding(
         db,
         finding_id=finding_id,
@@ -939,12 +940,14 @@ async def update_safety_finding_endpoint(finding_id: str, payload: SafetyFinding
     if updated is None:
         raise HTTPException(status_code=404, detail="Safety finding not found")
     event_record = None
-    if updated.status == "RESOLVED" and not was_resolved:
+    if updated.status in CLOSED_FINDING_STATUSES and updated.status != previous_status:
+        # Resolving or dismissing closes the finding: its events stop penalizing the vessel, and the closure is
+        # recorded in the event history (SAFETY_FINDING_RESOLVED / SAFETY_FINDING_DISMISSED).
         resolve_safety_finding_events(db, updated.finding_id)
         event_record = create_safety_event_record(
             db,
             vessel_id=updated.vessel_id,
-            event_type="SAFETY_FINDING_RESOLVED",
+            event_type=f"SAFETY_FINDING_{updated.status}",
             title=updated.title,
             description=updated.resolution_notes or updated.description,
             severity=updated.severity,
@@ -952,10 +955,11 @@ async def update_safety_finding_endpoint(finding_id: str, payload: SafetyFinding
             event_status="RESOLVED",
             metadata={"finding_id": updated.finding_id, "round_id": updated.round_id, "checkpoint_id": updated.checkpoint_id},
         )
-    db.commit()
+        commit_with_engine_sync(db)
+    else:
+        db.commit()
     await broadcast_status_message("safety_finding_updated", {"finding_id": updated.finding_id, "status": updated.status, "severity": updated.severity})
     if event_record is not None:
-        sync_engine_from_db(db)
         await broadcast_status_message("security_event_created", {"event_id": event_record.event_id, "event_type": event_record.event_type, "severity": event_record.severity})
     return {
         "id": updated.id,

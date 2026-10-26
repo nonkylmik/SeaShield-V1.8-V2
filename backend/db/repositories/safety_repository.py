@@ -78,6 +78,8 @@ ROUND_TEMPLATE_MAP: dict[str, list[str]] = {
 VALID_STATUSES = {"PASS", "WARNING", "FAIL", "NOT_APPLICABLE", "NOT_CHECKED"}
 VALID_SEVERITIES = {"INFO", "LOW", "MEDIUM", "HIGH", "CRITICAL"}
 VALID_FINDING_STATUSES = {"OPEN", "IN_PROGRESS", "RESOLVED", "DISMISSED"}
+# A closed finding no longer penalizes its vessel and is not reused when its checkpoint fails again.
+CLOSED_FINDING_STATUSES = ("RESOLVED", "DISMISSED")
 OPEN_ROUND_STATUSES = {"PLANNED", "IN_PROGRESS", "OVERDUE"}
 STARTABLE_ROUND_STATUSES = {"PLANNED", "OVERDUE"}
 
@@ -398,7 +400,7 @@ def create_safety_finding(
             select(SafetyFindingRecord).where(
                 SafetyFindingRecord.round_id == round_id,
                 SafetyFindingRecord.checkpoint_id == checkpoint_id,
-                SafetyFindingRecord.status != "RESOLVED",
+                SafetyFindingRecord.status.notin_(CLOSED_FINDING_STATUSES),
             )
         )
         if existing is not None:
