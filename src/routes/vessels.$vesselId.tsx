@@ -90,7 +90,9 @@ function VesselDetail() {
                 ? "secure"
                 : vessel.securityState === "critical"
                   ? "critical"
-                  : "caution"
+                  : vessel.securityState === "unknown"
+                    ? "default"
+                    : "caution"
             }
             sub={vessel.securityState.toUpperCase()}
           >

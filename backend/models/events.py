@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, computed_field
 
 from models.security_status import status_for_score
 
@@ -49,14 +49,13 @@ class Vessel(BaseModel):
     imo: str
     base_score: int = Field(ge=0, le=100)
     score: int = Field(ge=0, le=100)
-    # Always derived from `score` (see models/security_status.py); a supplied value is replaced, never trusted.
-    status: str = ""
     last_communication: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
-    @model_validator(mode="after")
-    def classify_score(self) -> "Vessel":
-        self.status = status_for_score(self.score)
-        return self
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def status(self) -> str:
+        """Always derived from the current score (see models/security_status.py); it cannot be set or go stale."""
+        return status_for_score(self.score)
 
 
 class Camera(BaseModel):

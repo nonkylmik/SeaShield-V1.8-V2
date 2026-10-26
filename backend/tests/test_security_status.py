@@ -66,6 +66,17 @@ def test_vessel_status_is_derived_from_score_and_ignores_supplied_status(supplie
     assert vessel.status == "WARNING"
 
 
+def test_vessel_status_follows_score_changes_after_construction():
+    vessel = Vessel(id="v", name="Test", imo="IMO 0000000", base_score=95, score=95)
+    assert vessel.status == "SECURE"
+
+    vessel.score = 50
+
+    assert vessel.status == "CRITICAL"
+    assert vessel.model_dump()["status"] == "CRITICAL"
+    assert '"status":"CRITICAL"' in vessel.model_dump_json()
+
+
 @pytest.mark.parametrize("stored_status", ["SECURE", "WARNING", "", "BOGUS"])
 def test_api_derives_status_from_score_when_stored_status_conflicts_or_is_missing(client, stored_status):
     test_client, sessions = client
