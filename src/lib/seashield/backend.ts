@@ -1,3 +1,4 @@
+import { securityStateFromApi } from "./securityStatus";
 import { appendSafetyRounds, hydrateFromBackend, setOperator } from "./store";
 import type {
   Camera,
@@ -9,7 +10,6 @@ import type {
   SafetyRoundTemplate,
   SecurityEvent,
   Severity,
-  Vessel,
 } from "./types";
 
 const API_URL = (import.meta.env.VITE_API_URL ?? "http://localhost:8000").replace(/\/$/, "");
@@ -67,8 +67,6 @@ const severity = (value: string): Severity => {
     ? (normalized as Severity)
     : "info";
 };
-const stateFor = (score: number): Vessel["securityState"] =>
-  score >= 86 ? "secure" : score >= 72 ? "elevated" : score >= 55 ? "warning" : "critical";
 const HAS_TIMEZONE = /(?:Z|[+-]\d{2}:?\d{2})$/i;
 const dateMs = (value?: string) => {
   if (!value) return Date.now();
@@ -155,7 +153,7 @@ export async function refreshSeaShieldBackend() {
       name: v.name,
       imo: v.imo,
       score: v.score,
-      state: stateFor(v.score),
+      state: securityStateFromApi(v.status),
       lastComms: dateMs(v.last_communication),
     })),
     cameras: cameras.map((c) => ({

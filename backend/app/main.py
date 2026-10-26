@@ -516,7 +516,8 @@ def get_security(vessel_id: str, db: Session = Depends(get_db)):
         if vessel is None:
             raise HTTPException(status_code=404, detail="Vessel not found")
         return {"vessel_id": vessel.id, "score": vessel.score, "status": vessel.status}
-    return {"vessel_id": record.vessel_id, "score": record.score, "status": record.status}
+    vessel = to_vessel_model(record)
+    return {"vessel_id": vessel.id, "score": vessel.score, "status": vessel.status}
 
 
 @app.get("/incidents/{incident_id}")

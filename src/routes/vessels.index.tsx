@@ -65,7 +65,7 @@ function VesselsIndex() {
                       {v.securityScore}
                     </span>
                   </div>
-                  <ScoreBar score={v.securityScore} />
+                  <ScoreBar score={v.securityScore} state={v.securityState} />
                 </div>
                 <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-[11px]">
                   {[

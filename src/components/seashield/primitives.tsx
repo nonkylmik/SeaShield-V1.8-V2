@@ -114,15 +114,9 @@ export function Metric({
   );
 }
 
-export function ScoreBar({ score }: { score: number }) {
-  const tone =
-    score >= 86
-      ? "bg-secure"
-      : score >= 72
-        ? "bg-caution"
-        : score >= 55
-          ? "bg-warning"
-          : "bg-critical";
+/** The bar's length is the score; its colour is the backend-owned status, never a threshold on the score. */
+export function ScoreBar({ score, state }: { score: number; state: SecurityState }) {
+  const tone = stateDot[state];
   return (
     <div className="h-1.5 w-full overflow-hidden rounded-full bg-secondary">
       <div

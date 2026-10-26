@@ -97,7 +97,7 @@ function FleetView() {
                     <td className="px-3 py-2">
                       <div className="flex items-center gap-2">
                         <span className="w-20">
-                          <ScoreBar score={v.securityScore} />
+                          <ScoreBar score={v.securityScore} state={v.securityState} />
                         </span>
                         <span className="tabular">{v.securityScore}</span>
                       </div>

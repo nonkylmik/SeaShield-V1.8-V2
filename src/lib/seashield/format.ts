@@ -45,6 +45,7 @@ export const stateColor: Record<SecurityState, string> = {
   elevated: "text-caution",
   warning: "text-warning",
   critical: "text-critical",
+  unknown: "text-muted-foreground",
 };
 
 export const stateDot: Record<SecurityState, string> = {
@@ -52,6 +53,7 @@ export const stateDot: Record<SecurityState, string> = {
   elevated: "bg-caution",
   warning: "bg-warning",
   critical: "bg-critical",
+  unknown: "bg-muted-foreground",
 };
 
 export const onlineDot: Record<OnlineState, string> = {

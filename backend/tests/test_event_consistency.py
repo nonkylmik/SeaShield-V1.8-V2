@@ -113,7 +113,7 @@ def test_event_creation_updates_engine_and_persisted_scores(client, monkeypatch)
 
     assert response.status_code == 201
     assert scores(test_client)["calypso"] == 72
-    assert test_client.get("/security/calypso").json() == {"vessel_id": "calypso", "score": 72, "status": "WARNING"}
+    assert test_client.get("/security/calypso").json() == {"vessel_id": "calypso", "score": 72, "status": "ELEVATED"}
     assert persisted_state(sessions, "calypso") == (72, 72)
     assert "evt-create" in {event.event_id for event in main.engine.events}
     assert broadcasts == [("security_event_created", {"event_id": "evt-create", "event_type": "UNKNOWN_DEVICE", "severity": "CRITICAL"}, True)]
@@ -249,7 +249,7 @@ def test_score_notifications_are_sent_only_after_commit(client, engine_messages)
     assert test_client.post("/api/security-events", json=event_payload("evt-notify")).status_code == 201
 
     score_messages = [message for message in engine_messages if message[0] == "security_score_changed"]
-    assert score_messages == [("security_score_changed", {"vessel_id": "calypso", "score": 72, "status": "WARNING"}, 72)]
+    assert score_messages == [("security_score_changed", {"vessel_id": "calypso", "score": 72, "status": "ELEVATED"}, 72)]
 
 
 def test_rolled_back_change_sends_no_score_notifications(client, engine_messages, monkeypatch):
@@ -274,7 +274,7 @@ def test_simulation_injection_still_notifies_immediately(client, engine_messages
 
     types = [message[0] for message in engine_messages]
     assert "security_event" in types
-    assert ("security_score_changed", {"vessel_id": "calypso", "score": 72, "status": "WARNING"}) in [(message[0], message[1]) for message in engine_messages]
+    assert ("security_score_changed", {"vessel_id": "calypso", "score": 72, "status": "ELEVATED"}) in [(message[0], message[1]) for message in engine_messages]
 
 
 def test_link_committed_concurrently_blocks_deletion(client, monkeypatch):
@@ -392,5 +392,5 @@ def test_failed_commit_after_queued_score_notifications_publishes_nothing(client
     # The next successful commit publishes the expected notification for committed state only.
     assert test_client.post("/api/security-events", json=event_payload("evt-commit-succeeds")).status_code == 201
     assert [message for message in engine_messages if message[0] == "security_score_changed"] == [
-        ("security_score_changed", {"vessel_id": "calypso", "score": 72, "status": "WARNING"}, 72)
+        ("security_score_changed", {"vessel_id": "calypso", "score": 72, "status": "ELEVATED"}, 72)
     ]

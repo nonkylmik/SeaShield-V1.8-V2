@@ -1,6 +1,7 @@
 export type Severity = "critical" | "high" | "medium" | "low" | "info";
 
-export type SecurityState = "secure" | "elevated" | "warning" | "critical";
+// "unknown": the backend sent no recognisable status (see securityStatus.ts).
+export type SecurityState = "secure" | "elevated" | "warning" | "critical" | "unknown";
 
 export type OnlineState = "online" | "degraded" | "offline";
 

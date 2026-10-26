@@ -14,6 +14,7 @@ import {
 import { CameraTile } from "@/components/seashield/CameraTile";
 import { now } from "@/lib/seashield/store";
 import { vesselView } from "@/lib/seashield/vesselView";
+import type { SecurityState } from "@/lib/seashield/types";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/vessels/$vesselId")({
@@ -93,7 +94,7 @@ function VesselDetail() {
             }
             sub={vessel.securityState.toUpperCase()}
           >
-            <ScoreBar score={vessel.securityScore} />
+            <ScoreBar score={vessel.securityScore} state={vessel.securityState} />
           </Metric>
           <SystemMetric label="Physical security" state={vessel.physical} />
           <Metric
@@ -313,7 +314,7 @@ function SystemMetric({
   sub,
 }: {
   label: string;
-  state?: "secure" | "elevated" | "warning" | "critical";
+  state?: SecurityState;
   online?: "online" | "degraded" | "offline";
   sub?: string;
 }) {

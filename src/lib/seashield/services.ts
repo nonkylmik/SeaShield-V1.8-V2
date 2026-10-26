@@ -7,6 +7,7 @@ import {
   runBackendScenario,
   updateBackendIncident,
 } from "./backend";
+import { fleetSecurityState } from "./securityStatus";
 import type {
   AccessRecord,
   Camera,
@@ -119,13 +120,7 @@ export const securityService = {
       cyberTotal: cyber.length,
       unauthorizedAccess: access.filter((a) => a.result !== "authorized").length,
       avgScore: avg,
-      fleetState: vessels.some((v) => v.securityState === "critical")
-        ? ("critical" as const)
-        : vessels.some((v) => v.securityState === "warning")
-          ? ("warning" as const)
-          : vessels.some((v) => v.securityState === "elevated")
-            ? ("elevated" as const)
-            : ("secure" as const),
+      fleetState: fleetSecurityState(vessels.map((v) => v.securityState)),
     };
   },
 };

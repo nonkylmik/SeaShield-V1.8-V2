@@ -2,7 +2,9 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+from models.security_status import status_for_score
 
 
 class EventCategory(str, Enum):
@@ -47,8 +49,14 @@ class Vessel(BaseModel):
     imo: str
     base_score: int = Field(ge=0, le=100)
     score: int = Field(ge=0, le=100)
-    status: str = "SECURE"
+    # Always derived from `score` (see models/security_status.py); a supplied value is replaced, never trusted.
+    status: str = ""
     last_communication: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    @model_validator(mode="after")
+    def classify_score(self) -> "Vessel":
+        self.status = status_for_score(self.score)
+        return self
 
 
 class Camera(BaseModel):
