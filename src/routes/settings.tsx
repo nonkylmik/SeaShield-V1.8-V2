@@ -88,7 +88,7 @@ function SettingsView() {
                 detection.
               </p>
               <button
-                onClick={() => simulationService.reset()}
+                onClick={() => void simulationService.reset()}
                 className="label-mono border border-border px-2 py-1 hover:bg-accent"
               >
                 Reset simulated state

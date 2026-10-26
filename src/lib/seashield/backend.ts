@@ -1,5 +1,6 @@
 import { parseApiTimestamp } from "./freshness";
 import { securityStateFromApi } from "./securityStatus";
+import { ApiRequestError, errorDetail } from "./writeFailures";
 import { appendSafetyRounds, hydrateFromBackend, setOperator } from "./store";
 import type {
   Camera,
@@ -104,7 +105,10 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     credentials: "include",
     headers: { "Content-Type": "application/json", ...options?.headers },
   });
-  if (!response.ok) throw new Error(`SeaShield API request failed (${response.status})`);
+  if (!response.ok) {
+    const body: unknown = await response.json().catch(() => null);
+    throw new ApiRequestError(response.status, errorDetail(body));
+  }
   return response.status === 204 ? (undefined as T) : (response.json() as Promise<T>);
 }
 
@@ -126,7 +130,7 @@ export async function loginBackend(email: string, password: string) {
     body: JSON.stringify({ email, password }),
   });
   setOperator(response.user.name, response.user.role);
-  await refreshSeaShieldBackend();
+  await refreshAfterWrite();
 }
 
 export async function logoutBackend() {
@@ -224,6 +228,14 @@ export async function refreshSeaShieldBackend() {
   });
 }
 
+/**
+ * Re-reads backend state after a write that succeeded. A failure here is a connection problem, shown by the
+ * degraded indicator; it must not make the write look failed, because the change was saved.
+ */
+async function refreshAfterWrite() {
+  await refreshSeaShieldBackend().catch(() => hydrateFromBackend({ health: "degraded" }));
+}
+
 export async function listSafetyRounds(
   filters: {
     vesselId?: string | undefined;
@@ -273,7 +285,7 @@ export async function createSafetyRound(input: {
     method: "POST",
     body: JSON.stringify(input),
   });
-  await refreshSeaShieldBackend();
+  await refreshAfterWrite();
   return round;
 }
 
@@ -282,7 +294,7 @@ export async function startSafetyRound(roundId: string) {
     `/api/v1/safety-rounds/${encodeURIComponent(roundId)}/start`,
     { method: "POST" },
   );
-  await refreshSeaShieldBackend();
+  await refreshAfterWrite();
   return round;
 }
 
@@ -291,7 +303,7 @@ export async function completeSafetyRound(roundId: string) {
     `/api/v1/safety-rounds/${encodeURIComponent(roundId)}/complete`,
     { method: "POST" },
   );
-  await refreshSeaShieldBackend();
+  await refreshAfterWrite();
   return round;
 }
 
@@ -300,7 +312,7 @@ export async function cancelSafetyRound(roundId: string) {
     `/api/v1/safety-rounds/${encodeURIComponent(roundId)}/cancel`,
     { method: "POST" },
   );
-  await refreshSeaShieldBackend();
+  await refreshAfterWrite();
   return round;
 }
 
@@ -321,7 +333,7 @@ export async function updateSafetyCheckpoint(
       body: JSON.stringify(input),
     },
   );
-  await refreshSeaShieldBackend();
+  await refreshAfterWrite();
   return result;
 }
 
@@ -342,7 +354,7 @@ export async function updateSafetyFinding(
       body: JSON.stringify(input),
     },
   );
-  await refreshSeaShieldBackend();
+  await refreshAfterWrite();
   return finding;
 }
 const scenarioEventMap: Record<string, string> = {
@@ -363,14 +375,14 @@ export async function runBackendScenario(uiScenario: string, vesselId: string) {
     method: "POST",
     body: JSON.stringify({ vessel_id: vesselId, event_type: eventType }),
   });
-  await refreshSeaShieldBackend();
+  await refreshAfterWrite();
   return result.correlation
     ? `${eventType.replaceAll("_", " ")} injected · correlated: ${result.correlation.title}`
     : `${eventType.replaceAll("_", " ")} injected for ${vesselId}.`;
 }
 export async function resetBackendSimulation() {
   await request("/api/v1/simulation/reset", { method: "POST" });
-  await refreshSeaShieldBackend();
+  await refreshAfterWrite();
 }
 export async function updateBackendIncident(
   id: string,
@@ -392,7 +404,7 @@ export async function updateBackendIncident(
       ...(actor ? { actor } : {}),
     }),
   });
-  await refreshSeaShieldBackend();
+  await refreshAfterWrite();
 }
 
 export async function createBackendIncident(input: {
@@ -412,7 +424,7 @@ export async function createBackendIncident(input: {
       assigned_operator: input.assignee,
     }),
   });
-  await refreshSeaShieldBackend();
+  await refreshAfterWrite();
   return incident;
 }
 
@@ -421,7 +433,7 @@ export async function addBackendIncidentNote(id: string, body: string, author: s
     method: "POST",
     body: JSON.stringify({ body, author }),
   });
-  await refreshSeaShieldBackend();
+  await refreshAfterWrite();
 }
 
 export async function acknowledgeBackendEvent(id: string, acknowledgedBy: string) {
@@ -429,7 +441,7 @@ export async function acknowledgeBackendEvent(id: string, acknowledgedBy: string
     method: "POST",
     body: JSON.stringify({ acknowledged_by: acknowledgedBy }),
   });
-  await refreshSeaShieldBackend();
+  await refreshAfterWrite();
 }
 const REFRESH_DEBOUNCE_MS = 250;
 const MAX_RECONNECT_DELAY_MS = 30_000;

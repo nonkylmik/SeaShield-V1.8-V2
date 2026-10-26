@@ -16,6 +16,7 @@ export function SimulationConsole({ className }: { className?: string }) {
 
   const fire = async (id: (typeof simulationService.scenarios)[number]["id"]) => {
     const outcome = await simulationService.trigger(id, vesselId);
+    if (outcome === null) return;
     setFlash(outcome);
     window.setTimeout(() => setFlash(null), 4000);
   };

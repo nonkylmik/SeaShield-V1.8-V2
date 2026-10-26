@@ -12,6 +12,7 @@ import type { ReactNode } from "react";
 
 import appCss from "../styles.css?url";
 import { AppShell } from "../components/seashield/AppShell";
+import { Toaster } from "@/components/ui/sonner";
 
 function NotFoundComponent() {
   return (
@@ -120,6 +121,8 @@ function RootComponent() {
         {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
         <Outlet />
       </AppShell>
+      {/* Shows failed writes (see reportWriteFailure in services.ts). */}
+      <Toaster theme="dark" position="bottom-right" />
     </QueryClientProvider>
   );
 }
