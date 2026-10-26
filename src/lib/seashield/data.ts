@@ -379,6 +379,7 @@ export function buildSeedState(): SeaShieldState {
       },
     ],
     simLog: [],
+    simLogAvailable: true,
     selectedVesselId: "all",
     operator: { name: "R. Vance", role: "Senior Security Operator", shift: "12:00–00:00Z" },
     connection: { edge: "online", backend: "online", mode: "SIMULATION V1" },

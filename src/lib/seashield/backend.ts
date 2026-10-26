@@ -159,7 +159,8 @@ export async function refreshSeaShieldBackend() {
     request<ApiIncident[]>("/api/v1/incidents"),
     request<SafetyRound[]>("/api/v1/safety-rounds?limit=100"),
     request<SafetyFinding[]>("/api/v1/safety-findings?limit=100"),
-    request<ApiSimulationLogEntry[]>("/api/v1/simulation/log?limit=40"),
+    // Supplementary: if only the log fails, the rest of the refresh still applies (null = unavailable).
+    request<ApiSimulationLogEntry[]>("/api/v1/simulation/log?limit=40").catch(() => null),
   ]);
   if (sequence !== refreshSequence) return;
   hydrateFromBackend({
@@ -232,16 +233,22 @@ export async function refreshSeaShieldBackend() {
     })),
     safetyRounds,
     safetyFindings,
-    simLog: simulationLog.map((entry) => ({
-      id: entry.event_id,
-      ts: dateMs(entry.timestamp),
-      scenario: entry.scenario_label,
-      vesselId: entry.vessel_id,
-      outcome: simulationLogOutcome(
-        entry,
-        vessels.find((vessel) => vessel.id === entry.vessel_id)?.name ?? entry.vessel_id,
-      ),
-    })),
+    // When the log is unavailable the last log received is kept, not replaced by an empty one.
+    simLogAvailable: simulationLog !== null,
+    ...(simulationLog
+      ? {
+          simLog: simulationLog.map((entry) => ({
+            id: entry.event_id,
+            ts: dateMs(entry.timestamp),
+            scenario: entry.scenario_label,
+            vesselId: entry.vessel_id,
+            outcome: simulationLogOutcome(
+              entry,
+              vessels.find((vessel) => vessel.id === entry.vessel_id)?.name ?? entry.vessel_id,
+            ),
+          })),
+        }
+      : {}),
     fleetAverage:
       fleet.average_score === null
         ? null

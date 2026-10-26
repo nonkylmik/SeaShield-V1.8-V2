@@ -10,6 +10,7 @@ export function SimulationConsole({ className }: { className?: string }) {
   const vessels = useSeaShield((s) => s.vessels);
   const selected = useSeaShield((s) => s.selectedVesselId);
   const log = useSeaShield((s) => s.simLog);
+  const logAvailable = useSeaShield((s) => s.simLogAvailable);
   const [target, setTarget] = useState<string>("");
   const vesselId = target || (selected !== "all" ? selected : vessels[0]!.id);
   const [flash, setFlash] = useState<string | null>(null);
@@ -73,14 +74,21 @@ export function SimulationConsole({ className }: { className?: string }) {
             <Zap className="size-3" /> {flash}
           </div>
         ) : null}
+        {logAvailable ? null : (
+          <div className="label-mono mx-3 mb-2 border border-warning/40 bg-warning/10 px-2 py-1.5 normal-case text-warning">
+            Simulation log unavailable
+            {log.length ? " — showing the last entries received." : "."}
+          </div>
+        )}
         <div className="min-h-0 flex-1 overflow-auto border-t border-border">
           <table className="w-full text-xs">
             <tbody>
               {log.length === 0 ? (
                 <tr>
                   <td className="px-3 py-3 text-muted-foreground">
-                    No simulated events triggered yet. Fire a scenario to see events, correlation
-                    and incidents update across the console.
+                    {logAvailable
+                      ? "No simulated events triggered yet. Fire a scenario to see events, correlation and incidents update across the console."
+                      : "No log entries received yet."}
                   </td>
                 </tr>
               ) : (

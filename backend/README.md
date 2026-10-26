@@ -95,7 +95,7 @@ API docs are available at `http://localhost:8000/docs`.
 - `POST /api/v1/simulation/next`
 - `POST /api/v1/simulation/pause`, `/resume`, `/stop`, `/reset`
 
-`GET /api/v1/simulation/log` lists what the simulation recorded, newest first: events from scenario steps and manual injections (not safety-round reports or events ingested over REST), each with `scenario_label`, `status` and the `incident_ids` it was correlated into. The UI's simulation console shows this log; a failed injection records nothing, so it has no entry (the UI reports the failure separately). Reset resolves logged events but keeps them.
+`GET /api/v1/simulation/log` lists what the simulation recorded, newest first: events from scenario steps and manual injections (not safety-round reports or events ingested over REST), each with `scenario_label`, `status` and the `incident_ids` it was correlated into. The UI's simulation console shows this log; a failed injection records nothing, so it has no entry (the UI reports the failure separately). If only this endpoint fails, the UI keeps refreshing everything else, keeps the last log it received and marks the log as unavailable. Reset resolves logged events but keeps them.
 
 ### Vessel security status
 
