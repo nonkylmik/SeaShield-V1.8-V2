@@ -1043,12 +1043,15 @@ async def simulation_stop():
 @app.post("/simulation/reset")
 @app.post("/api/v1/simulation/reset")
 async def simulation_reset():
-    engine.reset()
     with SessionLocal() as db:
         # One transaction: resolving events, closing open incidents and the recalculated scores commit together.
+        # The engine's events, incidents and scores are rebuilt from the database either way (on failure, from
+        # the unchanged committed state).
         resolve_all_open_events(db, commit=False)
         close_open_incident_records(db, status=IncidentStatus.RESOLVED.value, reason="Closed by simulation reset", actor="System", commit=False)
         commit_with_engine_sync(db)
+    # Scenario progress and camera status exist only in memory: reset them only after the commit succeeded.
+    engine.reset_runtime_state()
     await broadcast_status_message("simulation_status", {"scenario": engine.scenarios.name, "status": engine.scenarios.status.value, "index": engine.scenarios.index})
     await broadcast_status_message("notification", {"title": "Simulation reset", "message": "The simulation has been reset.", "severity": "INFO"})
     return simulation_status()

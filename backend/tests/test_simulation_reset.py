@@ -131,13 +131,39 @@ def test_reset_scores_match_persisted_state_after_restart(client, monkeypatch):
     assert {incident_id: incident(test_client, incident_id)["status"] for incident_id in statuses} == statuses
 
 
+def simulation_runtime(test_client) -> tuple[dict, list[dict]]:
+    return test_client.get("/api/v1/simulation/status").json(), test_client.get("/api/v1/cameras").json()
+
+
+def test_successful_reset_clears_scenario_progress_and_camera_state(client):
+    test_client, _ = client
+    test_client.post("/api/v1/simulation/start", json={"scenario": "cyber-intrusion"})
+    test_client.post("/api/v1/simulation/inject", json={"vessel_id": "calypso", "event_type": "CAMERA_OFFLINE"})
+    status, cameras = simulation_runtime(test_client)
+    assert (status["scenario"], status["status"], status["index"]) == ("cyber-intrusion", "RUNNING", 1)
+    assert [camera["online"] for camera in cameras] == [False]
+
+    assert test_client.post("/api/v1/simulation/reset").status_code == 200
+
+    status, cameras = simulation_runtime(test_client)
+    assert (status["scenario"], status["status"], status["index"]) == (None, "IDLE", 0)
+    assert [(camera["online"], camera["recording"]) for camera in cameras] == [(True, True)]
+
+
 def test_failed_reset_changes_nothing(client, monkeypatch):
     test_client, sessions = client
+    test_client.post("/api/v1/simulation/start", json={"scenario": "cyber-intrusion"})
     first = test_client.post("/api/v1/simulation/inject", json={"vessel_id": "calypso", "event_type": "UNAUTHORIZED_ACCESS"})
     test_client.post("/api/v1/simulation/inject", json={"vessel_id": "calypso", "event_type": "CAMERA_OFFLINE"})
     incident_id = next(item["incident_id"] for item in test_client.get("/api/v1/incidents").json() if item["vessel_id"] == "calypso")
     incident_before = incident(test_client, incident_id)
     scores_before = scores(test_client)
+    status_before, cameras_before = simulation_runtime(test_client)
+    assert (status_before["scenario"], status_before["status"], status_before["index"]) == ("cyber-intrusion", "RUNNING", 1)
+    assert [camera["online"] for camera in cameras_before] == [False]
+    events_before = [event.event_id for event in main.engine.events]
+
+    real_append_security_score = main.append_security_score
 
     def fail(*args, **kwargs):
         raise RuntimeError("score history unavailable")
@@ -151,3 +177,11 @@ def test_failed_reset_changes_nothing(client, monkeypatch):
     assert scores(test_client) == scores_before
     assert next(vessel for vessel in main.engine.vessels if vessel.id == "calypso").score == scores_before["calypso"]
     assert persisted_scores(sessions, ["calypso"]) == {"calypso": (scores_before["calypso"], scores_before["calypso"])}
+    assert simulation_runtime(test_client) == (status_before, cameras_before)
+    assert [event.event_id for event in main.engine.events] == events_before
+    assert [item.incident_id for item in main.engine.incidents.get_all()] == [incident_id]
+
+    # The scenario continues from where it was: the next step is the second of the five.
+    monkeypatch.setattr(main, "append_security_score", real_append_security_score)
+    assert test_client.post("/api/v1/simulation/next").json()["event"]["event_type"] == "FAILED_AUTHENTICATION"
+    assert test_client.get("/api/v1/simulation/status").json()["index"] == 2

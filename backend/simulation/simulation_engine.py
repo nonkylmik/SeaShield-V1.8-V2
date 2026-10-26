@@ -113,11 +113,15 @@ class SimulationEngine:
     def stop(self) -> None: self.scenarios.stop()
 
     def reset(self) -> None:
-        self.scenarios.reset()
+        self.reset_runtime_state()
         self.incidents.reset()
         self.events.clear()
-        self.cameras = [Camera(id="cam-17", vessel_id="calypso", location="Cargo Area")]
         self.vessels = self._default_vessels()
+
+    def reset_runtime_state(self) -> None:
+        """Reset the state that exists only in memory: scenario progress and camera status."""
+        self.scenarios.reset()
+        self.cameras = [Camera(id="cam-17", vessel_id="calypso", location="Cargo Area")]
 
     def resolve_incident(self, incident_id: str, status, notes: str = ""):
         incident = self.incidents.update_status(incident_id, status, notes)
