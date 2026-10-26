@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
@@ -6,7 +8,9 @@ from sqlalchemy.orm import sessionmaker
 import app.main as main
 from db.database import Base, get_db
 from db.events import get_event
-from db.models import EventAcknowledgementRecord, IncidentEventLink
+from db.models import EventAcknowledgementRecord, IncidentEventLink, IncidentRecord
+from db.repositories.event_repository import create_event_record
+from db.repositories.incident_repository import MissingIncidentEvidence, create_incident_record
 from db.repositories.security_repository import latest_security_score
 from db.repositories.vessel_repository import get_vessel_record
 from simulation.simulation_engine import SimulationEngine
@@ -210,4 +214,150 @@ def test_failed_deletion_keeps_event_acknowledgement_and_scores(client, monkeypa
     assert "evt-keep" in {event.event_id for event in main.engine.events}
     assert next(vessel for vessel in main.engine.vessels if vessel.id == "calypso").score == 72
     assert persisted_state(sessions, "calypso") == (72, 72)
+    assert broadcasts == []
+
+
+@pytest.fixture()
+def engine_messages(client):
+    """Records the engine's own notifications together with the score committed when each was sent."""
+    _, sessions, _ = client
+    messages: list[tuple[str, dict, int | None]] = []
+
+    async def record(payload: dict) -> None:
+        committed = None
+        if payload["type"] == "security_score_changed":
+            with sessions() as database:
+                committed = get_vessel_record(database, payload["data"]["vessel_id"]).score
+        messages.append((payload["type"], payload["data"], committed))
+
+    main.engine.set_broadcaster(record)
+    return messages
+
+
+def add_link(sessions, incident_id: str, event_id: str) -> None:
+    """Commits an incident link from a separate session, as a concurrent request would."""
+    with sessions() as database:
+        database.add(IncidentRecord(incident_id=incident_id, vessel_id="calypso", type="Concurrent", title="Concurrent", severity="HIGH", description="Linked by a concurrent request."))
+        database.add(IncidentEventLink(incident_id=incident_id, event_id=event_id))
+        database.commit()
+
+
+def test_score_notifications_are_sent_only_after_commit(client, engine_messages):
+    test_client, _, _ = client
+
+    assert test_client.post("/api/security-events", json=event_payload("evt-notify")).status_code == 201
+
+    score_messages = [message for message in engine_messages if message[0] == "security_score_changed"]
+    assert score_messages == [("security_score_changed", {"vessel_id": "calypso", "score": 72, "status": "WARNING"}, 72)]
+
+
+def test_rolled_back_change_sends_no_score_notifications(client, engine_messages, monkeypatch):
+    test_client, sessions, _ = client
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("score history unavailable")
+
+    monkeypatch.setattr(main, "append_security_score", fail)
+    with pytest.raises(RuntimeError):
+        test_client.post("/api/security-events", json=event_payload("evt-rolled-back"))
+
+    assert engine_messages == []
+    assert next(vessel for vessel in main.engine.vessels if vessel.id == "calypso").score == 92
+    assert persisted_state(sessions, "calypso") == (92, 92)
+
+
+def test_simulation_injection_still_notifies_immediately(client, engine_messages):
+    test_client, _, _ = client
+
+    assert test_client.post("/api/v1/simulation/inject", json={"vessel_id": "calypso", "event_type": "FIRE_ALARM"}).status_code == 200
+
+    types = [message[0] for message in engine_messages]
+    assert "security_event" in types
+    assert ("security_score_changed", {"vessel_id": "calypso", "score": 72, "status": "WARNING"}) in [(message[0], message[1]) for message in engine_messages]
+
+
+def test_link_committed_concurrently_blocks_deletion(client, monkeypatch):
+    test_client, sessions, broadcasts = client
+    test_client.post("/api/security-events", json=event_payload("evt-race"))
+    test_client.post("/api/security-events/evt-race/acknowledge", json={"acknowledged_by": "Operator"})
+    broadcasts.clear()
+    real_delete = main.delete_event_record
+
+    def delete_after_concurrent_link(database, event_id, **kwargs):
+        # The link commits after the route's existence check but before the deletion takes the write lock.
+        add_link(sessions, "INC-RACE", event_id)
+        return real_delete(database, event_id, **kwargs)
+
+    monkeypatch.setattr(main, "delete_event_record", delete_after_concurrent_link)
+    response = test_client.delete("/api/security-events/evt-race")
+
+    assert response.status_code == 409
+    assert "INC-RACE" in response.json()["detail"]
+    with sessions() as database:
+        assert get_event(database, "evt-race") is not None
+        assert database.scalars(select(IncidentEventLink).where(IncidentEventLink.event_id == "evt-race")).all()
+        assert database.scalars(select(EventAcknowledgementRecord).where(EventAcknowledgementRecord.event_id == "evt-race")).all()
+    assert "evt-race" in {event.event_id for event in main.engine.events}
+    assert scores(test_client)["calypso"] == 72
+    assert broadcasts == []
+
+
+def test_incident_cannot_link_an_event_deleted_concurrently(client):
+    _, sessions, _ = client
+    with sessions() as database:
+        create_event_record(database, event_id="evt-kept", timestamp=datetime.now(timezone.utc), vessel_id="calypso", event_type="UNAUTHORIZED_ACCESS", category="PHYSICAL", severity="HIGH", source="test", description="kept")
+        with pytest.raises(MissingIncidentEvidence):
+            create_incident_record(database, incident_id="INC-NEW", vessel_id="calypso", type="Breach", title="Breach", severity="HIGH", description="new", related_event_ids=["evt-kept", "evt-deleted"])
+        assert database.scalar(select(IncidentRecord).where(IncidentRecord.incident_id == "INC-NEW")) is None
+
+        create_incident_record(database, incident_id="INC-EXISTING", vessel_id="calypso", type="Breach", title="Breach", severity="HIGH", description="existing", related_event_ids=["evt-kept"])
+        with pytest.raises(MissingIncidentEvidence):
+            create_incident_record(database, incident_id="INC-EXISTING", vessel_id="calypso", type="Breach", title="Breach", severity="HIGH", description="existing", related_event_ids=["evt-kept", "evt-deleted"])
+        links = database.scalars(select(IncidentEventLink.event_id).where(IncidentEventLink.incident_id.in_(["INC-NEW", "INC-EXISTING"]))).all()
+    assert links == ["evt-kept"]
+
+
+def test_concurrent_duplicate_event_id_returns_conflict(client, engine_messages, monkeypatch):
+    test_client, sessions, broadcasts = client
+    assert test_client.post("/api/security-events", json=event_payload("evt-concurrent", severity="LOW")).status_code == 201
+    engine_messages.clear()
+    broadcasts.clear()
+    real_get_event = main.get_event
+    calls = 0
+
+    def miss_first_lookup(database, event_id):
+        # The duplicate check runs before the concurrent request's insert becomes visible.
+        nonlocal calls
+        calls += 1
+        return None if calls == 1 else real_get_event(database, event_id)
+
+    monkeypatch.setattr(main, "get_event", miss_first_lookup)
+    response = test_client.post("/api/security-events", json=event_payload("evt-concurrent", severity="CRITICAL"))
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Event ID already exists"
+    with sessions() as database:
+        assert get_event(database, "evt-concurrent").severity == "LOW"
+    assert scores(test_client)["calypso"] == 90
+    assert persisted_state(sessions, "calypso") == (90, 90)
+    assert [event.event_id for event in main.engine.events].count("evt-concurrent") == 1
+    assert engine_messages == []
+    assert broadcasts == []
+
+
+def test_event_deleted_concurrently_returns_not_found_without_broadcast(client, monkeypatch):
+    test_client, sessions, broadcasts = client
+    test_client.post("/api/security-events", json=event_payload("evt-gone"))
+    broadcasts.clear()
+    real_delete = main.delete_event_record
+
+    def delete_after_concurrent_delete(database, event_id, **kwargs):
+        with sessions() as concurrent:
+            real_delete(concurrent, event_id)
+        return real_delete(database, event_id, **kwargs)
+
+    monkeypatch.setattr(main, "delete_event_record", delete_after_concurrent_delete)
+    response = test_client.delete("/api/security-events/evt-gone")
+
+    assert response.status_code == 404
     assert broadcasts == []

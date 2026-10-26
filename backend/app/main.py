@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -165,16 +166,18 @@ def sync_engine_from_db(db: Session, *, commit: bool = True) -> None:
 def commit_with_engine_sync(db: Session) -> None:
     """Commit the session's pending event changes together with the scores recalculated from them.
 
-    On failure nothing is committed and the engine is rebuilt from the committed database state, so the database,
-    the engine and the persisted scores never diverge. Callers broadcast only after this returns.
+    Engine notifications (score and status changes) are held until the commit succeeds. On failure nothing is
+    committed, the held notifications are dropped, and the engine is rebuilt from the committed database state
+    without notifying clients, since committed state did not change. Callers broadcast only after this returns.
     """
     try:
-        db.flush()
-        sync_engine_from_db(db, commit=False)
-        db.commit()
+        with engine.deferred_notifications():
+            db.flush()
+            sync_engine_from_db(db, commit=False)
+            db.commit()
     except Exception:
         db.rollback()
-        with SessionLocal() as recovery:
+        with engine.deferred_notifications(publish=False), SessionLocal() as recovery:
             sync_engine_from_db(recovery)
         raise
 
@@ -461,7 +464,14 @@ async def post_security_event(payload: SecurityEventCreate, db: Session = Depend
         raise HTTPException(status_code=404, detail="Vessel not found")
     if get_event(db, payload.event_id):
         raise HTTPException(status_code=409, detail="Event ID already exists")
-    record = create_event(db, SecurityEvent(**payload.model_dump()), payload.scenario, commit=False)
+    try:
+        record = create_event(db, SecurityEvent(**payload.model_dump()), payload.scenario, commit=False)
+    except IntegrityError as exc:
+        # A concurrent request committed the same event_id after the check above.
+        db.rollback()
+        if get_event(db, payload.event_id) is None:
+            raise
+        raise HTTPException(status_code=409, detail="Event ID already exists") from exc
     commit_with_engine_sync(db)
     await broadcast_status_message("security_event_created", {"event_id": record.event_id, "event_type": record.event_type, "severity": record.severity})
     return event_response(record)
@@ -472,12 +482,18 @@ async def remove_security_event(event_id: str, db: Session = Depends(get_db)):
     record = get_event(db, event_id)
     if record is None:
         raise HTTPException(status_code=404, detail="Security event not found")
+    vessel_id = record.vessel_id
+    # Delete first: the write takes the database write lock, so the link check below sees every committed link,
+    # and incident creation (which verifies its events under the same lock) cannot link this event concurrently.
+    if not delete_event_record(db, event_id, commit=False):
+        # A concurrent request deleted it after the check above.
+        db.rollback()
+        raise HTTPException(status_code=404, detail="Security event not found")
     linked_incident_ids = get_linked_incident_ids(db, event_id)
     if linked_incident_ids:
-        # Incident evidence is never removed implicitly: the event and its links stay intact.
+        # Incident evidence is never removed implicitly: the event, its links and its acknowledgement stay intact.
+        db.rollback()
         raise HTTPException(status_code=409, detail=f"Security event is evidence for incident(s) {', '.join(linked_incident_ids)} and cannot be deleted")
-    vessel_id = record.vessel_id
-    delete_event_record(db, event_id, commit=False)
     commit_with_engine_sync(db)
     await broadcast_status_message("security_event_deleted", {"event_id": event_id, "vessel_id": vessel_id})
 
