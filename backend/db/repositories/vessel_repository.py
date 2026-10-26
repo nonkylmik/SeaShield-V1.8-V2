@@ -31,6 +31,7 @@ def upsert_vessel_record(
     score: int,
     status: str = "SECURE",
     last_communication: datetime | None = None,
+    commit: bool = True,
 ) -> VesselRecord:
     record = db.scalar(select(VesselRecord).where(VesselRecord.vessel_id == vessel_id))
     if record is None:
@@ -52,8 +53,11 @@ def upsert_vessel_record(
         record.status = status
         record.last_communication = last_communication or datetime.now(timezone.utc)
         record.updated_at = datetime.now(timezone.utc)
-    db.commit()
-    db.refresh(record)
+    if commit:
+        db.commit()
+        db.refresh(record)
+    else:
+        db.flush()
     return record
 
 

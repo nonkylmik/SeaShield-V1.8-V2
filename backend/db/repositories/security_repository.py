@@ -16,6 +16,7 @@ def append_security_score(
     previous_score: int | None = None,
     reason: str | None = None,
     timestamp: datetime | None = None,
+    commit: bool = True,
 ) -> SecurityScoreHistory:
     record = SecurityScoreHistory(
         vessel_id=vessel_id,
@@ -25,8 +26,11 @@ def append_security_score(
         timestamp=timestamp or datetime.now(timezone.utc),
     )
     db.add(record)
-    db.commit()
-    db.refresh(record)
+    if commit:
+        db.commit()
+        db.refresh(record)
+    else:
+        db.flush()
     return record
 
 

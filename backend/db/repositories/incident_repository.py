@@ -81,6 +81,11 @@ def get_related_event_ids(db: Session, incident_id: str) -> list[str]:
     return list(rows)
 
 
+def get_linked_incident_ids(db: Session, event_id: str) -> list[str]:
+    rows = db.scalars(select(IncidentEventLink.incident_id).where(IncidentEventLink.event_id == event_id).order_by(IncidentEventLink.incident_id)).all()
+    return list(dict.fromkeys(rows))
+
+
 def update_incident_record(
     db: Session,
     incident_id: str,
