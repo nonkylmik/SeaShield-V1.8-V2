@@ -107,6 +107,10 @@ API docs are available at `http://localhost:8000/docs`.
 
 This changed in V4: earlier versions returned only `SECURE` (85–100), `WARNING` (60–84) and `CRITICAL` (0–59). The frontend is the only client and is deployed together with the backend; before any third-party client depends on `/api/v1`, a change like this needs explicit versioning or a compatibility plan.
 
+### Vessel last communication
+
+`last_communication` is the time of the most recent security event recorded for the vessel, from any source (simulation ticks and injections, `POST /api/security-events`, safety-round reports). It uses the event's own timestamp, clamped to the server's current time, and only moves forward. Score recalculation, startup sync, reset and event deletion never change it, for any vessel. A vessel row created for the first time starts at its creation time. The UI measures its age against the real clock and shows a missing or invalid value as unknown.
+
 `GET /api/v1/fleet/security-summary` returns `{ "vessel_count", "average_score", "average_status" }`: the fleet's mean score (rounded half up) and the classification of that average under the same bands. It is not the worst vessel's status; the UI shows the fleet status (the most severe vessel status) separately.
 
 Reset resolves open security events and closes incidents that are still open (`NEW`, `INVESTIGATING`, `CONTAINED`) as `RESOLVED`, adding a "Closed by simulation reset" entry to each one's activity timeline. `RESOLVED` and `FALSE POSITIVE` incidents and all investigation notes are left unchanged. These changes and the recalculated scores commit in one transaction; if it fails, nothing changes.

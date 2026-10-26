@@ -75,7 +75,8 @@ export interface Vessel {
   flag: string;
   route: string;
   position: string;
-  lastComms: number;
+  /** Epoch ms of the vessel's last communication; null when unknown. */
+  lastComms: number | null;
   securityState: SecurityState;
   securityScore: number;
   physical: SecurityState;

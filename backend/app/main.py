@@ -37,7 +37,7 @@ from db.repositories.safety_repository import (
     update_safety_finding,
 )
 from db.repositories.security_repository import append_security_score, latest_security_score
-from db.repositories.vessel_repository import get_vessel_record, list_vessel_records, to_vessel_model, upsert_vessel_record
+from db.repositories.vessel_repository import get_vessel_record, list_vessel_records, record_vessel_communication, to_vessel_model, upsert_vessel_record
 from models.events import EventCategory, SecurityEvent, Severity
 from models.incidents import Incident, IncidentCreate, IncidentNoteCreate, IncidentStatus, IncidentUpdate
 from models.safety_rounds import SafetyCheckpointPatch, SafetyCheckpointStatus, SafetyFindingCreate, SafetyFindingUpdate, SafetyRoundCreate
@@ -209,7 +209,9 @@ def create_safety_event_record(
         status=event_status,
         metadata={"source": "safety_round", **(metadata or {})},
     )
-    return create_event(db, event, "safety-rounds", commit=commit)
+    record = create_event(db, event, "safety-rounds", commit=commit)
+    record_vessel_communication(db, vessel_id, event.timestamp, commit=commit)
+    return record
 
 
 def seed_safety_demo_data(db: Session) -> None:
@@ -427,6 +429,7 @@ def persist_result(db: Session, result, scenario: str | None):
         scenario=scenario,
         metadata=result.event.metadata,
     )
+    record_vessel_communication(db, result.event.vessel_id, result.event.timestamp)
     for vessel in engine.vessels:
         upsert_vessel_record(db, vessel_id=vessel.id, name=vessel.name, imo=vessel.imo, base_score=vessel.base_score, score=vessel.score, status=vessel.status)
         latest_score = latest_security_score(db, vessel.id)
@@ -486,6 +489,7 @@ async def post_security_event(payload: SecurityEventCreate, db: Session = Depend
         if get_event(db, payload.event_id) is None:
             raise
         raise HTTPException(status_code=409, detail="Event ID already exists") from exc
+    record_vessel_communication(db, record.vessel_id, record.timestamp, commit=False)
     commit_with_engine_sync(db)
     await broadcast_status_message("security_event_created", {"event_id": record.event_id, "event_type": record.event_type, "severity": record.severity})
     return event_response(record)

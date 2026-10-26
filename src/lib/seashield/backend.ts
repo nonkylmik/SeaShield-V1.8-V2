@@ -1,3 +1,4 @@
+import { parseApiTimestamp } from "./freshness";
 import { securityStateFromApi } from "./securityStatus";
 import { appendSafetyRounds, hydrateFromBackend, setOperator } from "./store";
 import type {
@@ -72,13 +73,7 @@ const severity = (value: string): Severity => {
     ? (normalized as Severity)
     : "info";
 };
-const HAS_TIMEZONE = /(?:Z|[+-]\d{2}:?\d{2})$/i;
-const dateMs = (value?: string) => {
-  if (!value) return Date.now();
-  const iso = value.replace(" ", "T");
-  const parsed = Date.parse(HAS_TIMEZONE.test(iso) ? iso : `${iso}Z`);
-  return Number.isNaN(parsed) ? Date.now() : parsed;
-};
+const dateMs = (value?: string) => parseApiTimestamp(value) ?? Date.now();
 let refreshSequence = 0;
 
 function eventCategory(event: ApiEvent): SecurityEvent["category"] {
@@ -160,7 +155,7 @@ export async function refreshSeaShieldBackend() {
       imo: v.imo,
       score: v.score,
       state: securityStateFromApi(v.status),
-      lastComms: dateMs(v.last_communication),
+      lastComms: parseApiTimestamp(v.last_communication),
     })),
     cameras: cameras.map((c) => ({
       id: c.id,
