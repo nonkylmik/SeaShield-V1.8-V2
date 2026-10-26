@@ -43,8 +43,13 @@ class SimulationEngine:
         self._deferred = held = []
         try:
             yield
+        except BaseException:
+            # The block failed (e.g. the commit raised): drop everything it queued and re-raise.
+            held.clear()
+            raise
         finally:
             self._deferred = None
+        # Reached only when the block completed without raising.
         if publish:
             for message_type, data in held:
                 self._emit(message_type, data)

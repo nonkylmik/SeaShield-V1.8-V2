@@ -3,7 +3,8 @@ from datetime import datetime, timezone
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.exc import OperationalError
+from sqlalchemy.orm import Session, sessionmaker
 
 import app.main as main
 from db.database import Base, get_db
@@ -361,3 +362,35 @@ def test_event_deleted_concurrently_returns_not_found_without_broadcast(client, 
 
     assert response.status_code == 404
     assert broadcasts == []
+
+
+def test_failed_commit_after_queued_score_notifications_publishes_nothing(client, engine_messages, monkeypatch):
+    test_client, sessions, broadcasts = client
+    real_commit = Session.commit
+    failures = []
+
+    def commit_fails_once(session):
+        # The first commit is the one in commit_with_engine_sync, after the score change was queued.
+        if not failures:
+            failures.append(True)
+            raise OperationalError("COMMIT", {}, Exception("database is locked"))
+        return real_commit(session)
+
+    monkeypatch.setattr(Session, "commit", commit_fails_once)
+    with pytest.raises(OperationalError):
+        test_client.post("/api/security-events", json=event_payload("evt-commit-fails"))
+
+    assert failures == [True]
+    assert engine_messages == []
+    assert broadcasts == []
+    with sessions() as database:
+        assert get_event(database, "evt-commit-fails") is None
+    assert "evt-commit-fails" not in {event.event_id for event in main.engine.events}
+    assert next(vessel for vessel in main.engine.vessels if vessel.id == "calypso").score == 92
+    assert persisted_state(sessions, "calypso") == (92, 92)
+
+    # The next successful commit publishes the expected notification for committed state only.
+    assert test_client.post("/api/security-events", json=event_payload("evt-commit-succeeds")).status_code == 201
+    assert [message for message in engine_messages if message[0] == "security_score_changed"] == [
+        ("security_score_changed", {"vessel_id": "calypso", "score": 72, "status": "WARNING"}, 72)
+    ]
