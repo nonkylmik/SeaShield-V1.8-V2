@@ -10,7 +10,7 @@ from db.database import Base, get_db
 from db.repositories.event_repository import create_event_record
 from db.repositories.vessel_repository import get_vessel_record
 from models.events import Vessel
-from models.security_status import STATUS_BANDS, SecurityStatus, status_for_score
+from models.security_status import STATUS_BANDS, SecurityStatus, average_score, status_for_score
 from simulation.simulation_engine import SimulationEngine
 
 SEVERITY_ORDER = [SecurityStatus.SECURE.value, SecurityStatus.ELEVATED.value, SecurityStatus.WARNING.value, SecurityStatus.CRITICAL.value]
@@ -128,3 +128,32 @@ def test_startup_sync_rewrites_stored_statuses_from_legacy_bands(client, monkeyp
     with sessions() as database:
         stored = get_vessel_record(database, "calypso")
     assert (stored.score, stored.status) == (72, "ELEVATED")
+
+
+def test_average_score_rounds_half_up_and_handles_an_empty_fleet():
+    assert average_score([70, 71]) == 71
+    assert average_score([70, 70, 71]) == 70
+    assert average_score([]) is None
+
+
+def test_fleet_average_is_classified_on_its_own_not_by_the_worst_vessel(client):
+    test_client, sessions = client
+    for vessel_id in ("atlantic-trader", "baltic-guardian", "iron-horizon", "northern-star", "ocean-sentinel"):
+        store_vessel_row(sessions, vessel_id, score=95, status="SECURE")
+    store_vessel_row(sessions, "calypso", score=40, status="CRITICAL")
+
+    summary = test_client.get("/api/v1/fleet/security-summary").json()
+
+    # (5 * 95 + 40) / 6 = 85.83 -> 86: the average is SECURE although one vessel is CRITICAL.
+    assert summary == {"vessel_count": 6, "average_score": 86, "average_status": "SECURE"}
+    assert test_client.get("/api/v1/vessels/calypso").json()["status"] == "CRITICAL"
+
+
+def test_fleet_summary_matches_the_vessel_list(client):
+    test_client, _ = client
+    vessels = test_client.get("/api/v1/vessels").json()
+
+    summary = test_client.get("/api/v1/fleet/security-summary").json()
+
+    expected = average_score([vessel["score"] for vessel in vessels])
+    assert summary == {"vessel_count": len(vessels), "average_score": expected, "average_status": status_for_score(expected)}

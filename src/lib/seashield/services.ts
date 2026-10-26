@@ -7,7 +7,7 @@ import {
   runBackendScenario,
   updateBackendIncident,
 } from "./backend";
-import { fleetSecurityState } from "./securityStatus";
+import { fleetSecurityState, summaryAverage } from "./securityStatus";
 import type {
   AccessRecord,
   Camera,
@@ -103,9 +103,7 @@ export const securityService = {
     const incidents = scope(s.incidents, vesselId);
     const cyber = scope(s.cyber, vesselId);
     const access = scope(s.access, vesselId);
-    const avg = vessels.length
-      ? Math.round(vessels.reduce((a, v) => a + v.securityScore, 0) / vessels.length)
-      : 0;
+    const average = summaryAverage(vessels, vesselId !== "all", s.fleetAverage);
     return {
       vessels: vessels.length,
       camerasOnline: cams.filter((c) => c.state === "online").length,
@@ -119,7 +117,8 @@ export const securityService = {
       cyberAlerts: cyber.filter((c) => c.severity === "high" || c.severity === "critical").length,
       cyberTotal: cyber.length,
       unauthorizedAccess: access.filter((a) => a.result !== "authorized").length,
-      avgScore: avg,
+      avgScore: average.score,
+      avgState: average.state,
       fleetState: fleetSecurityState(vessels.map((v) => v.securityState)),
     };
   },

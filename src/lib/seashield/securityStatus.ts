@@ -23,3 +23,23 @@ const FLEET_PRECEDENCE: SecurityState[] = ["critical", "unknown", "warning", "el
 export function fleetSecurityState(states: SecurityState[]): SecurityState {
   return FLEET_PRECEDENCE.find((state) => states.includes(state)) ?? "secure";
 }
+
+type Classified = { score: number; state: SecurityState };
+
+/**
+ * The average shown in a summary and its colour, both from the backend: for the whole fleet, the fleet average
+ * and the backend's classification of that average (not the worst vessel's status); for one selected vessel,
+ * its score and status. Without backend data the local average is shown unclassified.
+ */
+export function summaryAverage(
+  vessels: { securityScore: number; securityState: SecurityState }[],
+  singleVessel: boolean,
+  fleetAverage: Classified | null,
+): Classified {
+  const [selected] = vessels;
+  if (singleVessel && selected)
+    return { score: selected.securityScore, state: selected.securityState };
+  if (fleetAverage) return fleetAverage;
+  const total = vessels.reduce((sum, vessel) => sum + vessel.securityScore, 0);
+  return { score: vessels.length ? Math.round(total / vessels.length) : 0, state: "unknown" };
+}

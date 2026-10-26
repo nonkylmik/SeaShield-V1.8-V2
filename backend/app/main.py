@@ -41,6 +41,7 @@ from db.repositories.vessel_repository import get_vessel_record, list_vessel_rec
 from models.events import EventCategory, SecurityEvent, Severity
 from models.incidents import Incident, IncidentCreate, IncidentNoteCreate, IncidentStatus, IncidentUpdate
 from models.safety_rounds import SafetyCheckpointPatch, SafetyCheckpointStatus, SafetyFindingCreate, SafetyFindingUpdate, SafetyRoundCreate
+from models.security_status import average_score, status_for_score
 from schemas.auth import LoginRequest, LoginResponse, UserResponse
 from schemas.security_events import EventAcknowledge, SecurityEventCreate, SecurityEventResponse
 from simulation.simulation_engine import SimulationEngine
@@ -375,6 +376,18 @@ def get_vessel(vessel_id: str, db: Session = Depends(get_db)):
             raise HTTPException(status_code=404, detail="Vessel not found")
         return vessel
     return to_vessel_model(record)
+
+
+@app.get("/api/v1/fleet/security-summary")
+def get_fleet_security_summary(db: Session = Depends(get_db)):
+    """The fleet's average score and the canonical classification of that average (not of the worst vessel)."""
+    vessels = get_vessels(db)
+    average = average_score([vessel.score for vessel in vessels])
+    return {
+        "vessel_count": len(vessels),
+        "average_score": average,
+        "average_status": status_for_score(average) if average is not None else None,
+    }
 
 
 @app.get("/api/v1/cameras")

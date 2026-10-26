@@ -83,6 +83,7 @@ API docs are available at `http://localhost:8000/docs`.
 - `GET /health`
 - `GET /api/v1/vessels`
 - `GET /api/v1/vessels/{vessel_id}`
+- `GET /api/v1/fleet/security-summary`
 - `GET /api/v1/cameras?vessel_id=...`
 - `GET /api/v1/events?vessel_id=...`
 - `GET /api/v1/incidents`
@@ -92,6 +93,21 @@ API docs are available at `http://localhost:8000/docs`.
 - `POST /api/v1/simulation/start` with `{ "scenario": "cyber|physical|systems" }`
 - `POST /api/v1/simulation/next`
 - `POST /api/v1/simulation/pause`, `/resume`, `/stop`, `/reset`
+
+### Vessel security status
+
+`status` on every vessel (`/vessels`, `/api/v1/vessels`, `/api/v1/vessels/{vessel_id}`, `/security/{vessel_id}`) and in `security_score_changed` / `vessel_status_changed` messages is derived from the current `score` by `backend/models/security_status.py` and is one of:
+
+| `status`   | `score` |
+| ---------- | ------- |
+| `SECURE`   | 86–100  |
+| `ELEVATED` | 72–85   |
+| `WARNING`  | 55–71   |
+| `CRITICAL` | 0–54    |
+
+This changed in V4: earlier versions returned only `SECURE` (85–100), `WARNING` (60–84) and `CRITICAL` (0–59). The frontend is the only client and is deployed together with the backend; before any third-party client depends on `/api/v1`, a change like this needs explicit versioning or a compatibility plan.
+
+`GET /api/v1/fleet/security-summary` returns `{ "vessel_count", "average_score", "average_status" }`: the fleet's mean score (rounded half up) and the classification of that average under the same bands. It is not the worst vessel's status; the UI shows the fleet status (the most severe vessel status) separately.
 
 Reset resolves open security events and closes incidents that are still open (`NEW`, `INVESTIGATING`, `CONTAINED`) as `RESOLVED`, adding a "Closed by simulation reset" entry to each one's activity timeline. `RESOLVED` and `FALSE POSITIVE` incidents and all investigation notes are left unchanged. These changes and the recalculated scores commit in one transaction; if it fails, nothing changes.
 

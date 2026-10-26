@@ -3,6 +3,7 @@
 A vessel's status is derived from its security score (0-100) and nothing else. Severity (INFO-CRITICAL) classifies
 individual events, incidents and safety findings and affects a vessel's status only through score penalties.
 """
+from decimal import Decimal
 from enum import Enum
 
 
@@ -27,3 +28,10 @@ def status_for_score(score: int) -> str:
         if score >= minimum:
             return status.value
     return SecurityStatus.CRITICAL.value
+
+
+def average_score(scores: list[int]) -> int | None:
+    """Mean score rounded half up (as the UI displays it), or None for no vessels."""
+    if not scores:
+        return None
+    return int(Decimal(sum(scores)) / Decimal(len(scores)) + Decimal("0.5"))

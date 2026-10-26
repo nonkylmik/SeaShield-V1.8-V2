@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { fleetSecurityState, securityStateFromApi } from "./securityStatus.ts";
+import { fleetSecurityState, securityStateFromApi, summaryAverage } from "./securityStatus.ts";
 
 test("shows the status the backend sent", () => {
   assert.equal(securityStateFromApi("SECURE"), "secure");
@@ -25,4 +25,28 @@ test("fleet status is the most severe vessel status", () => {
   assert.equal(fleetSecurityState(["warning", "critical", "unknown"]), "critical");
   assert.equal(fleetSecurityState(["secure", "unknown", "warning"]), "unknown");
   assert.equal(fleetSecurityState(["secure", "secure"]), "secure");
+});
+
+const vessel = (securityScore, securityState) => ({ securityScore, securityState });
+
+test("the fleet average is coloured by the backend's classification of the average, not the worst vessel", () => {
+  const fleet = [vessel(95, "secure"), vessel(95, "secure"), vessel(40, "critical")];
+  const fromBackend = { score: 77, state: "elevated" };
+  assert.deepEqual(summaryAverage(fleet, false, fromBackend), fromBackend);
+  assert.equal(fleetSecurityState(fleet.map((v) => v.securityState)), "critical");
+});
+
+test("a selected vessel's average is its own score and backend status", () => {
+  assert.deepEqual(summaryAverage([vessel(58, "warning")], true, { score: 90, state: "secure" }), {
+    score: 58,
+    state: "warning",
+  });
+});
+
+test("without backend data the average is shown but not classified", () => {
+  assert.deepEqual(summaryAverage([vessel(90, "secure"), vessel(81, "elevated")], false, null), {
+    score: 86,
+    state: "unknown",
+  });
+  assert.deepEqual(summaryAverage([], false, null), { score: 0, state: "unknown" });
 });

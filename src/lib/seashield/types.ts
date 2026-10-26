@@ -213,4 +213,6 @@ export interface SeaShieldState {
   connection: { edge: OnlineState; backend: OnlineState; mode: string };
   /** "seed" until the first backend vessel list has been applied. */
   dataSource: "seed" | "backend";
+  /** Fleet average score and the backend's classification of that average; null without backend data. */
+  fleetAverage: { score: number; state: SecurityState } | null;
 }

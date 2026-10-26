@@ -136,7 +136,7 @@ All events are fictional labels. For example, `FAILED_AUTHENTICATION` does not a
 | Event penalty | 0 | 2 | 5 | 10 | 20 |
 | Incident penalty | 0 | 4 | 8 | 15 | 25 |
 
-Vessel security status is classified by the backend only (`backend/models/security_status.py`), from the score: `SECURE` 86–100, `ELEVATED` 72–85, `WARNING` 55–71, `CRITICAL` 0–54. Every API response and WebSocket message derives the status from the score, so a stale or missing stored value is never returned. The UI shows the status it receives and never classifies scores; a missing or unrecognised status is shown as unknown. Fleet status is the most severe vessel status (critical, then unknown, warning, elevated, secure). Severity (info–critical) classifies individual events, incidents and safety findings and affects a vessel's status only through these penalties.
+Vessel security status is classified by the backend only (`backend/models/security_status.py`), from the score: `SECURE` 86–100, `ELEVATED` 72–85, `WARNING` 55–71, `CRITICAL` 0–54. Every API response and WebSocket message derives the status from the score, so a stale or missing stored value is never returned. The UI shows the status it receives and never classifies scores; a missing or unrecognised status is shown as unknown. Fleet status is the most severe vessel status (critical, then unknown, warning, elevated, secure); the fleet average score is coloured by the backend's classification of the average itself (`GET /api/v1/fleet/security-summary`), not by the worst vessel. Severity (info–critical) classifies individual events, incidents and safety findings and affects a vessel's status only through these penalties.
 
 Example flow (cyber intrusion scenario):
 

@@ -7,15 +7,17 @@ import { Metric, PageHeader, Panel, ScoreBar, SimBanner } from "@/components/sea
 import type { SecurityState } from "@/lib/seashield/types";
 import { cn } from "@/lib/utils";
 
-// The average score is coloured by the fleet's backend-owned status, not by a threshold on the average.
-const FLEET_TONE: Record<SecurityState, "secure" | "caution" | "warning" | "critical" | "default"> =
-  {
-    secure: "secure",
-    elevated: "caution",
-    warning: "warning",
-    critical: "critical",
-    unknown: "default",
-  };
+// The average score is coloured by the backend's classification of the average itself.
+const AVERAGE_TONE: Record<
+  SecurityState,
+  "secure" | "caution" | "warning" | "critical" | "default"
+> = {
+  secure: "secure",
+  elevated: "caution",
+  warning: "warning",
+  critical: "critical",
+  unknown: "default",
+};
 
 export const Route = createFileRoute("/reports")({
   head: () => ({
@@ -128,8 +130,8 @@ function ReportsView() {
             value={access.filter((a) => a.result !== "authorized").length}
             tone="caution"
           />
-          <Metric label="Avg security score" value={s.avgScore} tone={FLEET_TONE[s.fleetState]}>
-            <ScoreBar score={s.avgScore} state={s.fleetState} />
+          <Metric label="Avg security score" value={s.avgScore} tone={AVERAGE_TONE[s.avgState]}>
+            <ScoreBar score={s.avgScore} state={s.avgState} />
           </Metric>
         </div>
 

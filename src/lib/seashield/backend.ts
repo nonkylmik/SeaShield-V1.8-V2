@@ -23,6 +23,11 @@ type ApiVessel = {
   status: string;
   last_communication?: string;
 };
+type ApiFleetSummary = {
+  vessel_count: number;
+  average_score: number | null;
+  average_status: string | null;
+};
 type ApiCamera = {
   id: string;
   vessel_id: string;
@@ -135,10 +140,11 @@ export async function logoutBackend() {
 
 export async function refreshSeaShieldBackend() {
   const sequence = ++refreshSequence;
-  const [health, vessels, cameras, events, incidents, safetyRounds, safetyFindings] =
+  const [health, vessels, fleet, cameras, events, incidents, safetyRounds, safetyFindings] =
     await Promise.all([
       request<{ status: string }>("/health"),
       request<ApiVessel[]>("/api/v1/vessels"),
+      request<ApiFleetSummary>("/api/v1/fleet/security-summary"),
       request<ApiCamera[]>("/api/v1/cameras"),
       request<ApiEvent[]>("/api/security-events?limit=100"),
       request<ApiIncident[]>("/api/v1/incidents"),
@@ -216,6 +222,10 @@ export async function refreshSeaShieldBackend() {
     })),
     safetyRounds,
     safetyFindings,
+    fleetAverage:
+      fleet.average_score === null
+        ? null
+        : { score: fleet.average_score, state: securityStateFromApi(fleet.average_status) },
   });
 }
 
