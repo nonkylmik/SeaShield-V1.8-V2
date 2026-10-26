@@ -163,9 +163,25 @@ export function markNotificationsRead() {
   emit();
 }
 
+/** Marks an event acknowledged locally; returns a function that undoes it. */
 export function acknowledgeEvent(id: string) {
+  const previous = state.events.find((e) => e.id === id)?.acknowledged ?? false;
   state.events = state.events.map((e) => (e.id === id ? { ...e, acknowledged: true } : e));
   emit();
+  return () => {
+    state.events = state.events.map((e) => (e.id === id ? { ...e, acknowledged: previous } : e));
+    emit();
+  };
+}
+
+/** Returns a function that puts the incident back as it is now (used to undo a local change). */
+function incidentRestorer(id: string) {
+  const snapshot = state.incidents.find((i) => i.id === id);
+  return () => {
+    if (!snapshot) return;
+    state.incidents = state.incidents.map((i) => (i.id === id ? snapshot : i));
+    emit();
+  };
 }
 
 function pushEvent(e: Omit<SecurityEvent, "id" | "ts" | "acknowledged">) {
@@ -237,19 +253,30 @@ export function createIncident(input: {
     ],
   };
   state.incidents = [incident, ...state.incidents];
-  notify(
-    input.severity,
-    `${ref} opened — ${input.severity.toUpperCase()}`,
-    `${vesselName(input.vesselId)} — ${input.title}`,
-  );
-  emit();
+  notifyIncidentOpened(ref, input.severity, input.vesselId, input.title);
   return incident;
 }
 
+export function notifyIncidentOpened(
+  ref: string,
+  severity: Severity,
+  vesselId: string,
+  title: string,
+) {
+  notify(
+    severity,
+    `${ref} opened — ${severity.toUpperCase()}`,
+    `${vesselName(vesselId)} — ${title}`,
+  );
+  emit();
+}
+
+/** Applies an incident change locally; returns a function that undoes it. */
 export function updateIncident(
   id: string,
   patch: Partial<Pick<Incident, "status" | "severity" | "assignee">>,
 ) {
+  const undo = incidentRestorer(id);
   state.incidents = state.incidents.map((i) => {
     if (i.id !== id) return i;
     const changes = Object.entries(patch)
@@ -263,9 +290,12 @@ export function updateIncident(
     };
   });
   emit();
+  return undo;
 }
 
+/** Adds a note locally; returns a function that undoes it. */
 export function addIncidentNote(id: string, body: string, author: string) {
+  const undo = incidentRestorer(id);
   state.incidents = state.incidents.map((i) =>
     i.id === id
       ? {
@@ -280,10 +310,11 @@ export function addIncidentNote(id: string, body: string, author: string) {
       : i,
   );
   emit();
+  return undo;
 }
 
 export function setIncidentStatus(id: string, status: IncidentStatus) {
-  updateIncident(id, { status });
+  return updateIncident(id, { status });
 }
 
 function vesselName(id: string) {

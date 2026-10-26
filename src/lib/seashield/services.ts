@@ -1,13 +1,16 @@
+import { toast } from "sonner";
 import * as store from "./store";
 import {
   acknowledgeBackendEvent,
   addBackendIncidentNote,
   createBackendIncident,
+  refreshSeaShieldBackend,
   resetBackendSimulation,
   runBackendScenario,
   updateBackendIncident,
 } from "./backend";
 import { fleetSecurityState, summaryAverage } from "./securityStatus";
+import { describeWriteFailure, optimisticWrite } from "./writeFailures";
 import type {
   AccessRecord,
   Camera,
@@ -27,6 +30,16 @@ import type {
  * Later: each method becomes an HTTP call to the Python/FastAPI backend
  * (FastAPI → security engine → database) without UI changes.
  */
+
+/** Shows a failed write to the operator; failures are never swallowed. */
+export function reportWriteFailure(action: string, cause: unknown) {
+  const { title, description } = describeWriteFailure(action, cause);
+  toast.error(title, { description });
+}
+
+/** After a failed write, re-read the authoritative backend state (degraded if it cannot be reached). */
+const reconcileWithBackend = () =>
+  refreshSeaShieldBackend().catch(() => store.hydrateFromBackend({ health: "degraded" }));
 
 const scope = <T extends { vesselId: string }>(rows: T[], vesselId: string | "all") =>
   vesselId === "all" ? rows : rows.filter((r) => r.vesselId === vesselId);
@@ -48,10 +61,13 @@ export const sensorService = {
 export const eventService = {
   list: (vesselId: string | "all" = "all", limit = 100): SecurityEvent[] =>
     scope(store.getState().events, vesselId).slice(0, limit),
-  acknowledge: (id: string) => {
-    store.acknowledgeEvent(id);
-    void acknowledgeBackendEvent(id, store.getState().operator.name).catch(() => undefined);
-  },
+  acknowledge: (id: string) =>
+    optimisticWrite({
+      apply: () => store.acknowledgeEvent(id),
+      send: () => acknowledgeBackendEvent(id, store.getState().operator.name),
+      report: (cause) => reportWriteFailure("Acknowledge event", cause),
+      reconcile: reconcileWithBackend,
+    }),
 };
 
 export const incidentService = {
@@ -59,31 +75,44 @@ export const incidentService = {
     scope(store.getState().incidents, vesselId),
   get: (id: string): Incident | undefined =>
     store.getState().incidents.find((i) => i.id === id || i.ref === id),
-  create: (input: {
+  create: async (input: {
     title: string;
     vesselId: string;
     system: string;
     severity: Severity;
     assignee: string;
-  }) => {
-    const incident = store.createIncident(input);
-    void createBackendIncident(input).catch(() => undefined);
-    return incident;
+  }): Promise<boolean> => {
+    // Not optimistic: the backend assigns the incident ID, so the incident appears once it is saved.
+    try {
+      const incident = await createBackendIncident(input);
+      store.notifyIncidentOpened(incident.incident_id, input.severity, input.vesselId, input.title);
+      return true;
+    } catch (cause) {
+      reportWriteFailure("Create incident", cause);
+      return false;
+    }
   },
-  setStatus: (id: string, status: IncidentStatus) => {
-    store.setIncidentStatus(id, status);
-    void updateBackendIncident(id, { status }, store.getState().operator.name).catch(
-      () => undefined,
-    );
-  },
-  update: (id: string, patch: Partial<Pick<Incident, "severity" | "assignee" | "status">>) => {
-    store.updateIncident(id, patch);
-    void updateBackendIncident(id, patch, store.getState().operator.name).catch(() => undefined);
-  },
-  addNote: (id: string, body: string, author: string) => {
-    store.addIncidentNote(id, body, author);
-    void addBackendIncidentNote(id, body, author).catch(() => undefined);
-  },
+  setStatus: (id: string, status: IncidentStatus) =>
+    optimisticWrite({
+      apply: () => store.setIncidentStatus(id, status),
+      send: () => updateBackendIncident(id, { status }, store.getState().operator.name),
+      report: (cause) => reportWriteFailure("Update incident status", cause),
+      reconcile: reconcileWithBackend,
+    }),
+  update: (id: string, patch: Partial<Pick<Incident, "severity" | "assignee" | "status">>) =>
+    optimisticWrite({
+      apply: () => store.updateIncident(id, patch),
+      send: () => updateBackendIncident(id, patch, store.getState().operator.name),
+      report: (cause) => reportWriteFailure("Update incident", cause),
+      reconcile: reconcileWithBackend,
+    }),
+  addNote: (id: string, body: string, author: string) =>
+    optimisticWrite({
+      apply: () => store.addIncidentNote(id, body, author),
+      send: () => addBackendIncidentNote(id, body, author),
+      report: (cause) => reportWriteFailure("Add note", cause),
+      reconcile: reconcileWithBackend,
+    }),
 };
 
 export const securityService = {
@@ -126,9 +155,23 @@ export const securityService = {
 
 export const simulationService = {
   scenarios: store.SCENARIOS,
-  trigger: async (id: store.ScenarioId, vesselId: string) => {
-    return runBackendScenario(id, vesselId);
+  /** The outcome text, or null when the injection failed (the failure is reported). */
+  trigger: async (id: store.ScenarioId, vesselId: string): Promise<string | null> => {
+    try {
+      return await runBackendScenario(id, vesselId);
+    } catch (cause) {
+      reportWriteFailure("Run scenario", cause);
+      return null;
+    }
   },
   log: () => store.getState().simLog,
-  reset: async () => resetBackendSimulation(),
+  reset: async (): Promise<boolean> => {
+    try {
+      await resetBackendSimulation();
+      return true;
+    } catch (cause) {
+      reportWriteFailure("Reset simulation", cause);
+      return false;
+    }
+  },
 };

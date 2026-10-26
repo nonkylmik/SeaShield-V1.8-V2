@@ -21,7 +21,7 @@ import {
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { useSeaShield, useTelemetryClock } from "@/lib/seashield/useSeaShield";
-import { securityService, vesselService } from "@/lib/seashield/services";
+import { reportWriteFailure, securityService, vesselService } from "@/lib/seashield/services";
 import { utcTime, stateColor, severityText } from "@/lib/seashield/format";
 import { StatusDot } from "./primitives";
 import {
@@ -87,8 +87,12 @@ export function AppShell({ children }: { children: ReactNode }) {
         onSignOut={
           auth?.required
             ? async () => {
-                await logoutBackend();
-                setAuth({ required: true, authenticated: false });
+                try {
+                  await logoutBackend();
+                  setAuth({ required: true, authenticated: false });
+                } catch (cause) {
+                  reportWriteFailure("Sign out", cause);
+                }
               }
             : undefined
         }

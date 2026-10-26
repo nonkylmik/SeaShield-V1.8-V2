@@ -276,14 +276,24 @@ function CreateForm({ onDone }: { onDone: () => void }) {
   const [system, setSystem] = useState("CCTV");
   const [severity, setSeverity] = useState<Severity>("medium");
   const [assignee, setAssignee] = useState(operator.name);
+  const [saving, setSaving] = useState(false);
 
   return (
     <form
-      onSubmit={(e) => {
+      onSubmit={async (e) => {
         e.preventDefault();
-        if (!title.trim()) return;
-        incidentService.create({ title: title.trim(), vesselId, system, severity, assignee });
-        onDone();
+        if (!title.trim() || saving) return;
+        setSaving(true);
+        // The form closes only once the incident is saved; on failure it stays open with the input kept.
+        const saved = await incidentService.create({
+          title: title.trim(),
+          vesselId,
+          system,
+          severity,
+          assignee,
+        });
+        setSaving(false);
+        if (saved) onDone();
       }}
       className="grid shrink-0 grid-cols-1 items-end gap-2 border-b border-border bg-panel px-3 py-2 md:grid-cols-6"
     >
@@ -362,9 +372,10 @@ function CreateForm({ onDone }: { onDone: () => void }) {
         </label>
         <button
           type="submit"
-          className="label-mono mt-auto h-8 border border-signal/50 bg-signal/10 px-3 text-signal hover:bg-signal/20"
+          disabled={saving}
+          className="label-mono mt-auto h-8 border border-signal/50 bg-signal/10 px-3 text-signal hover:bg-signal/20 disabled:opacity-50"
         >
-          Create
+          {saving ? "Saving…" : "Create"}
         </button>
       </div>
     </form>
