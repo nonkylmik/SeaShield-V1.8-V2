@@ -51,7 +51,7 @@ Backend capabilities:
 - **Rule-based event correlation** that turns related events into incidents.
 - **Risk scoring**: a bounded 0–100 security score per vessel.
 - **Incident workflow**: create, update, notes, activity history, event acknowledgement.
-- **Safety rounds**: templates, round lifecycle (start, complete, cancel), checkpoint results and findings, with failed checkpoints creating security events.
+- **Safety rounds**: templates, round lifecycle (start, complete, cancel), checkpoint results and findings, with failed checkpoints creating security events. Resolving or dismissing a finding resolves its events, so it no longer lowers the vessel's score, and records a `SAFETY_FINDING_RESOLVED` or `SAFETY_FINDING_DISMISSED` event; a checkpoint that fails again afterwards opens a new finding.
 - **WebSocket broadcasts** of state changes to connected clients.
 - **Optional authentication**: a single demo user with an HMAC-signed session cookie, off by default (`AUTH_REQUIRED`).
 - **Persistent storage** through SQLAlchemy and Alembic (SQLite by default).
