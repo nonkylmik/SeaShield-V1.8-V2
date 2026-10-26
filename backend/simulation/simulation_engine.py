@@ -1,5 +1,6 @@
 import asyncio
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -29,12 +30,35 @@ class SimulationEngine:
         self.cameras = [Camera(id="cam-17", vessel_id="calypso", location="Cargo Area")]
         self.events: list[SecurityEvent] = []
         self._broadcast: Callable[[dict[str, Any]], Any] | None = None
+        self._deferred: list[tuple[str, dict[str, Any]]] | None = None
 
     def set_broadcaster(self, broadcaster: Callable[[dict[str, Any]], Any] | None) -> None:
         self._broadcast = broadcaster
 
+    @contextmanager
+    def deferred_notifications(self, *, publish: bool = True) -> Iterator[None]:
+        """Hold notifications until the block completes; send them only if it succeeds and `publish` is true."""
+        if self._deferred is not None:
+            raise RuntimeError("Engine notifications are already deferred")
+        self._deferred = held = []
+        try:
+            yield
+        except BaseException:
+            # The block failed (e.g. the commit raised): drop everything it queued and re-raise.
+            held.clear()
+            raise
+        finally:
+            self._deferred = None
+        # Reached only when the block completed without raising.
+        if publish:
+            for message_type, data in held:
+                self._emit(message_type, data)
+
     def _emit(self, message_type: str, data: dict[str, Any]) -> None:
         if self._broadcast is None:
+            return
+        if self._deferred is not None:
+            self._deferred.append((message_type, data))
             return
         payload = {"type": message_type, "timestamp": datetime.now(timezone.utc).isoformat(), "data": data}
         try:

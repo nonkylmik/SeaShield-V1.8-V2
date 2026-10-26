@@ -6,7 +6,23 @@ from uuid import uuid4
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from db.models import IncidentActivityRecord, IncidentEventLink, IncidentNoteRecord, IncidentRecord
+from db.models import IncidentActivityRecord, IncidentEventLink, IncidentNoteRecord, IncidentRecord, SecurityEventRecord
+
+
+class MissingIncidentEvidence(LookupError):
+    """Raised when an incident would be linked to security events that do not exist."""
+
+
+def _require_linked_events(db: Session, event_ids: list[str]) -> None:
+    # Runs after the link rows are flushed, i.e. while this transaction holds the database write lock, so an
+    # event deletion cannot commit between this check and the commit of the links.
+    if not event_ids:
+        return
+    found = set(db.scalars(select(SecurityEventRecord.event_id).where(SecurityEventRecord.event_id.in_(event_ids))).all())
+    missing = [event_id for event_id in event_ids if event_id not in found]
+    if missing:
+        db.rollback()
+        raise MissingIncidentEvidence(f"Cannot link missing security events: {', '.join(missing)}")
 
 
 def create_incident_record(
@@ -27,9 +43,13 @@ def create_incident_record(
 ) -> IncidentRecord:
     existing = get_incident_record(db, incident_id)
     if existing is not None:
-        for event_id in related_event_ids or []:
+        new_event_ids = []
+        for event_id in dict.fromkeys(related_event_ids or []):
             if not db.scalar(select(IncidentEventLink).where(IncidentEventLink.incident_id == incident_id, IncidentEventLink.event_id == event_id)):
                 db.add(IncidentEventLink(incident_id=incident_id, event_id=event_id))
+                new_event_ids.append(event_id)
+        db.flush()
+        _require_linked_events(db, new_event_ids)
         db.commit()
         return existing
     record = IncidentRecord(
@@ -47,11 +67,13 @@ def create_incident_record(
         updated_at=datetime.now(timezone.utc),
     )
     db.add(record)
+    event_ids = list(dict.fromkeys(related_event_ids or []))
+    for event_id in event_ids:
+        db.add(IncidentEventLink(incident_id=incident_id, event_id=event_id))
+    db.flush()
+    _require_linked_events(db, event_ids)
     db.commit()
     db.refresh(record)
-    for event_id in related_event_ids or []:
-        db.add(IncidentEventLink(incident_id=incident_id, event_id=event_id))
-    db.commit()
     return record
 
 
@@ -79,6 +101,11 @@ def next_incident_id(db: Session) -> str:
 def get_related_event_ids(db: Session, incident_id: str) -> list[str]:
     rows = db.scalars(select(IncidentEventLink.event_id).where(IncidentEventLink.incident_id == incident_id)).all()
     return list(rows)
+
+
+def get_linked_incident_ids(db: Session, event_id: str) -> list[str]:
+    rows = db.scalars(select(IncidentEventLink.incident_id).where(IncidentEventLink.event_id == event_id).order_by(IncidentEventLink.incident_id)).all()
+    return list(dict.fromkeys(rows))
 
 
 def update_incident_record(

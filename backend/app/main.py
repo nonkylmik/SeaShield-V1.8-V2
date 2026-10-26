@@ -6,15 +6,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from auth import SESSION_COOKIE, SESSION_TTL_SECONDS, auth_required, authenticate, create_session, read_session, validate_auth_configuration
 from db.database import Base, SessionLocal, engine as db_engine, get_db
-from db.events import create_event, delete_event, from_record, get_event, list_events, load_events
+from db.events import create_event, from_record, get_event, list_events, load_events
 from db.models import IncidentRecord, VesselRecord
-from db.repositories.event_repository import acknowledge_event, acknowledged_event_ids, create_event_record, list_event_records, resolve_all_open_events, resolve_safety_finding_events, set_event_status
-from db.repositories.incident_repository import add_incident_activity, add_incident_note, close_open_incident_records, create_incident_record, get_incident_record, get_related_event_ids, list_incident_activity, list_incident_notes, list_incident_records, next_incident_id, update_incident_record
+from db.repositories.event_repository import acknowledge_event, acknowledged_event_ids, create_event_record, delete_event_record, list_event_records, resolve_all_open_events, resolve_safety_finding_events, set_event_status
+from db.repositories.incident_repository import add_incident_activity, add_incident_note, close_open_incident_records, create_incident_record, get_incident_record, get_linked_incident_ids, get_related_event_ids, list_incident_activity, list_incident_notes, list_incident_records, next_incident_id, update_incident_record
 from db.repositories.safety_repository import (
     cancel_safety_round,
     complete_safety_round,
@@ -140,9 +141,9 @@ def incident_from_record(db: Session, record: IncidentRecord) -> Incident:
     )
 
 
-def persist_vessel_scores(db: Session) -> None:
+def persist_vessel_scores(db: Session, *, commit: bool = True) -> None:
     for vessel in engine.vessels:
-        upsert_vessel_record(db, vessel_id=vessel.id, name=vessel.name, imo=vessel.imo, base_score=vessel.base_score, score=vessel.score, status=vessel.status)
+        upsert_vessel_record(db, vessel_id=vessel.id, name=vessel.name, imo=vessel.imo, base_score=vessel.base_score, score=vessel.score, status=vessel.status, commit=commit)
         latest_score = latest_security_score(db, vessel.id)
         if latest_score is None or latest_score.score != vessel.score:
             append_security_score(
@@ -151,14 +152,34 @@ def persist_vessel_scores(db: Session) -> None:
                 score=vessel.score,
                 previous_score=latest_score.score if latest_score else None,
                 reason="score_recalculation",
+                commit=commit,
             )
 
 
-def sync_engine_from_db(db: Session) -> None:
+def sync_engine_from_db(db: Session, *, commit: bool = True) -> None:
     engine.events = load_events(db)
     engine.incidents._incidents = [incident_from_record(db, record) for record in list_incident_records(db)]
     engine.recalculate()
-    persist_vessel_scores(db)
+    persist_vessel_scores(db, commit=commit)
+
+
+def commit_with_engine_sync(db: Session) -> None:
+    """Commit the session's pending event changes together with the scores recalculated from them.
+
+    Engine notifications (score and status changes) are held until the commit succeeds. On failure nothing is
+    committed, the held notifications are dropped, and the engine is rebuilt from the committed database state
+    without notifying clients, since committed state did not change. Callers broadcast only after this returns.
+    """
+    try:
+        with engine.deferred_notifications():
+            db.flush()
+            sync_engine_from_db(db, commit=False)
+            db.commit()
+    except Exception:
+        db.rollback()
+        with engine.deferred_notifications(publish=False), SessionLocal() as recovery:
+            sync_engine_from_db(recovery)
+        raise
 
 
 def create_safety_event_record(
@@ -438,16 +459,43 @@ async def acknowledge_security_event(event_id: str, payload: EventAcknowledge | 
 
 
 @app.post("/api/security-events", response_model=SecurityEventResponse, status_code=201)
-def post_security_event(payload: SecurityEventCreate, db: Session = Depends(get_db)):
+async def post_security_event(payload: SecurityEventCreate, db: Session = Depends(get_db)):
+    if get_vessel_record(db, payload.vessel_id) is None and not any(vessel.id == payload.vessel_id for vessel in engine.vessels):
+        raise HTTPException(status_code=404, detail="Vessel not found")
     if get_event(db, payload.event_id):
         raise HTTPException(status_code=409, detail="Event ID already exists")
-    return event_response(create_event(db, SecurityEvent(**payload.model_dump()), payload.scenario))
+    try:
+        record = create_event(db, SecurityEvent(**payload.model_dump()), payload.scenario, commit=False)
+    except IntegrityError as exc:
+        # A concurrent request committed the same event_id after the check above.
+        db.rollback()
+        if get_event(db, payload.event_id) is None:
+            raise
+        raise HTTPException(status_code=409, detail="Event ID already exists") from exc
+    commit_with_engine_sync(db)
+    await broadcast_status_message("security_event_created", {"event_id": record.event_id, "event_type": record.event_type, "severity": record.severity})
+    return event_response(record)
 
 
 @app.delete("/api/security-events/{event_id}", status_code=204)
-def remove_security_event(event_id: str, db: Session = Depends(get_db)):
-    if not delete_event(db, event_id):
+async def remove_security_event(event_id: str, db: Session = Depends(get_db)):
+    record = get_event(db, event_id)
+    if record is None:
         raise HTTPException(status_code=404, detail="Security event not found")
+    vessel_id = record.vessel_id
+    # Delete first: the write takes the database write lock, so the link check below sees every committed link,
+    # and incident creation (which verifies its events under the same lock) cannot link this event concurrently.
+    if not delete_event_record(db, event_id, commit=False):
+        # A concurrent request deleted it after the check above.
+        db.rollback()
+        raise HTTPException(status_code=404, detail="Security event not found")
+    linked_incident_ids = get_linked_incident_ids(db, event_id)
+    if linked_incident_ids:
+        # Incident evidence is never removed implicitly: the event, its links and its acknowledgement stay intact.
+        db.rollback()
+        raise HTTPException(status_code=409, detail=f"Security event is evidence for incident(s) {', '.join(linked_incident_ids)} and cannot be deleted")
+    commit_with_engine_sync(db)
+    await broadcast_status_message("security_event_deleted", {"event_id": event_id, "vessel_id": vessel_id})
 
 
 @app.get("/incidents")

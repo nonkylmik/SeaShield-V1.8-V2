@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import Select, delete, select, update
 from sqlalchemy.orm import Session
@@ -84,9 +84,12 @@ def get_event_record(db: Session, event_id: str) -> SecurityEventRecord | None:
     return db.scalar(select(SecurityEventRecord).where(SecurityEventRecord.event_id == event_id))
 
 
-def delete_event_record(db: Session, event_id: str) -> bool:
+def delete_event_record(db: Session, event_id: str, *, commit: bool = True) -> bool:
+    """Delete an event together with its acknowledgement. Callers must refuse events linked to incidents."""
+    db.execute(delete(EventAcknowledgementRecord).where(EventAcknowledgementRecord.event_id == event_id))
     result = db.execute(delete(SecurityEventRecord).where(SecurityEventRecord.event_id == event_id))
-    db.commit()
+    if commit:
+        db.commit()
     return result.rowcount > 0
 
 
