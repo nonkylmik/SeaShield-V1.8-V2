@@ -7,6 +7,7 @@ from sqlalchemy.orm import sessionmaker
 
 import app.main as main
 from db.database import Base, get_db
+from db.models import SecurityEventRecord
 from db.repositories.vessel_repository import get_vessel_record, record_vessel_communication
 from simulation.simulation_engine import SimulationEngine
 
@@ -157,3 +158,63 @@ def test_unknown_vessel_is_ignored():
             return None
 
     assert record_vessel_communication(NoVessels(), "no-such-vessel", OLD) is None
+
+
+def fail_communication_update(monkeypatch) -> None:
+    def fail(*args, **kwargs):
+        raise RuntimeError("communication update failed")
+
+    monkeypatch.setattr(main, "record_vessel_communication", fail)
+
+
+def test_failed_communication_update_discards_the_simulated_event(client, monkeypatch):
+    test_client, sessions = client
+    set_all_communication(sessions, OLD)
+    events_before = test_client.get("/api/security-events?vessel_id=calypso&limit=500").json()
+    engine_events_before = [event.event_id for event in main.engine.events]
+    score_before = test_client.get("/security/calypso").json()
+    fail_communication_update(monkeypatch)
+
+    with pytest.raises(RuntimeError):
+        test_client.post("/api/v1/simulation/inject", json={"vessel_id": "calypso", "event_type": "FIRE_ALARM"})
+
+    assert test_client.get("/api/security-events?vessel_id=calypso&limit=500").json() == events_before
+    assert [event.event_id for event in main.engine.events] == engine_events_before
+    assert next(vessel for vessel in main.engine.vessels if vessel.id == "calypso").score == score_before["score"]
+    assert test_client.get("/security/calypso").json() == score_before
+    assert communication(sessions)["calypso"] == OLD
+
+
+def test_failed_communication_update_discards_the_safety_round_report(client, monkeypatch):
+    test_client, sessions = client
+    created = test_client.post("/api/v1/safety-rounds", json={"vessel_id": "atlantic-trader", "round_type": "Security Round"}).json()
+    set_all_communication(sessions, OLD)
+    fail_communication_update(monkeypatch)
+
+    with pytest.raises(RuntimeError):
+        test_client.post(f"/api/v1/safety-rounds/{created['round_id']}/start")
+
+    assert test_client.get(f"/api/v1/safety-rounds/{created['round_id']}").json()["status"] == "PLANNED"
+    assert test_client.get("/api/security-events?vessel_id=atlantic-trader&event_type=SAFETY_ROUND_STARTED").json() == []
+    assert communication(sessions)["atlantic-trader"] == OLD
+
+
+def test_safety_report_committed_on_its_own_includes_the_communication_time(client, monkeypatch):
+    _, sessions = client
+    set_all_communication(sessions, OLD)
+    report = {"vessel_id": "calypso", "event_type": "SAFETY_FINDING_CREATED", "title": "Report", "description": "Report", "severity": "INFO", "commit": True}
+    real_record_vessel_communication = main.record_vessel_communication
+
+    fail_communication_update(monkeypatch)
+    with sessions() as database, pytest.raises(RuntimeError):
+        main.create_safety_event_record(database, **report)
+    with sessions() as database:
+        assert database.query(SecurityEventRecord).filter_by(event_type="SAFETY_FINDING_CREATED").count() == 0
+    assert communication(sessions)["calypso"] == OLD
+
+    monkeypatch.setattr(main, "record_vessel_communication", real_record_vessel_communication)
+    with sessions() as database:
+        main.create_safety_event_record(database, **report)
+    with sessions() as database:
+        assert database.query(SecurityEventRecord).filter_by(event_type="SAFETY_FINDING_CREATED").count() == 1
+    assert communication(sessions)["calypso"] > OLD
