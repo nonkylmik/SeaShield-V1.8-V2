@@ -4,7 +4,20 @@ import { securityService } from "@/lib/seashield/services";
 import { useSeaShield } from "@/lib/seashield/useSeaShield";
 import { stateColor } from "@/lib/seashield/format";
 import { Metric, PageHeader, Panel, ScoreBar, SimBanner } from "@/components/seashield/primitives";
+import type { SecurityState } from "@/lib/seashield/types";
 import { cn } from "@/lib/utils";
+
+// The average score is coloured by the backend's classification of the average itself.
+const AVERAGE_TONE: Record<
+  SecurityState,
+  "secure" | "caution" | "warning" | "critical" | "default"
+> = {
+  secure: "secure",
+  elevated: "caution",
+  warning: "warning",
+  critical: "critical",
+  unknown: "default",
+};
 
 export const Route = createFileRoute("/reports")({
   head: () => ({
@@ -117,12 +130,8 @@ function ReportsView() {
             value={access.filter((a) => a.result !== "authorized").length}
             tone="caution"
           />
-          <Metric
-            label="Avg security score"
-            value={s.avgScore}
-            tone={s.avgScore >= 86 ? "secure" : "caution"}
-          >
-            <ScoreBar score={s.avgScore} />
+          <Metric label="Avg security score" value={s.avgScore} tone={AVERAGE_TONE[s.avgState]}>
+            <ScoreBar score={s.avgScore} state={s.avgState} />
           </Metric>
         </div>
 
@@ -264,7 +273,7 @@ function ReportsView() {
                     </span>
                   </div>
                   <div className="mt-1">
-                    <ScoreBar score={v.securityScore} />
+                    <ScoreBar score={v.securityScore} state={v.securityState} />
                   </div>
                 </li>
               ))}

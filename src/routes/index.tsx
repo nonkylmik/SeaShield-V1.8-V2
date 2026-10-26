@@ -65,7 +65,7 @@ function Dashboard() {
               value={<span className={stateColor[s.fleetState]}>{s.fleetState.toUpperCase()}</span>}
               sub={`avg score ${s.avgScore}`}
             >
-              <ScoreBar score={s.avgScore} />
+              <ScoreBar score={s.avgScore} state={s.avgState} />
             </Metric>
             <Metric label="Vessels monitored" value={s.vessels} sub="edge nodes linked" />
             <Metric
@@ -164,7 +164,7 @@ function Dashboard() {
                         <span className="label-mono text-[10px]">{v.imo}</span>
                       </span>
                       <span className="w-28">
-                        <ScoreBar score={v.securityScore} />
+                        <ScoreBar score={v.securityScore} state={v.securityState} />
                       </span>
                       <span
                         className={cn(

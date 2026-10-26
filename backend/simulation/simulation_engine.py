@@ -8,7 +8,7 @@ from typing import Any
 from models.events import Camera, SecurityEvent, Vessel
 from security_engine.event_correlation import CorrelationResult, correlate
 from security_engine.incident_manager import IncidentManager
-from security_engine.risk_scoring import calculate_score, status_for_score
+from security_engine.risk_scoring import calculate_score
 from simulation.event_generator import EventGenerator
 from simulation.scenario_manager import ScenarioManager, ScenarioStatus
 
@@ -137,7 +137,6 @@ class SimulationEngine:
             previous_score = vessel.score
             previous_status = vessel.status
             vessel.score = calculate_score(vessel, self.events, self.incidents.get_all())
-            vessel.status = status_for_score(vessel.score)
             if previous_score != vessel.score:
                 self._emit("security_score_changed", {"vessel_id": vessel.id, "score": vessel.score, "status": vessel.status})
             if previous_status != vessel.status:

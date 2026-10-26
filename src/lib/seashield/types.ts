@@ -1,6 +1,7 @@
 export type Severity = "critical" | "high" | "medium" | "low" | "info";
 
-export type SecurityState = "secure" | "elevated" | "warning" | "critical";
+// "unknown": the backend sent no recognisable status (see securityStatus.ts).
+export type SecurityState = "secure" | "elevated" | "warning" | "critical" | "unknown";
 
 export type OnlineState = "online" | "degraded" | "offline";
 
@@ -212,4 +213,6 @@ export interface SeaShieldState {
   connection: { edge: OnlineState; backend: OnlineState; mode: string };
   /** "seed" until the first backend vessel list has been applied. */
   dataSource: "seed" | "backend";
+  /** Fleet average score and the backend's classification of that average; null without backend data. */
+  fleetAverage: { score: number; state: SecurityState } | null;
 }

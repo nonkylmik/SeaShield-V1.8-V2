@@ -16,7 +16,6 @@ def to_vessel_model(record: VesselRecord) -> Vessel:
         imo=record.imo,
         base_score=record.base_score,
         score=record.score,
-        status=record.status,
         last_communication=record.last_communication or datetime.now(timezone.utc),
     )
 

@@ -10,8 +10,8 @@ def test_risk_score_penalties_and_boundaries():
     event = SecurityEvent(event_id="e", vessel_id="v", event_type="FIRE_ALARM", category=EventCategory.ENVIRONMENTAL, severity=Severity.CRITICAL, source="test", description="test")
     assert calculate_score(vessel, [event], []) == 80
     assert calculate_score(vessel, [event] * 20, []) == 0
-    assert status_for_score(59) == "CRITICAL"
-    assert status_for_score(60) == "WARNING"
+    assert status_for_score(54) == "CRITICAL"
+    assert status_for_score(55) == "WARNING"
 
 
 def test_resolved_incident_recovers_score():

@@ -1,3 +1,4 @@
+import { securityStateFromApi } from "./securityStatus";
 import { appendSafetyRounds, hydrateFromBackend, setOperator } from "./store";
 import type {
   Camera,
@@ -9,7 +10,6 @@ import type {
   SafetyRoundTemplate,
   SecurityEvent,
   Severity,
-  Vessel,
 } from "./types";
 
 const API_URL = (import.meta.env.VITE_API_URL ?? "http://localhost:8000").replace(/\/$/, "");
@@ -22,6 +22,11 @@ type ApiVessel = {
   score: number;
   status: string;
   last_communication?: string;
+};
+type ApiFleetSummary = {
+  vessel_count: number;
+  average_score: number | null;
+  average_status: string | null;
 };
 type ApiCamera = {
   id: string;
@@ -67,8 +72,6 @@ const severity = (value: string): Severity => {
     ? (normalized as Severity)
     : "info";
 };
-const stateFor = (score: number): Vessel["securityState"] =>
-  score >= 86 ? "secure" : score >= 72 ? "elevated" : score >= 55 ? "warning" : "critical";
 const HAS_TIMEZONE = /(?:Z|[+-]\d{2}:?\d{2})$/i;
 const dateMs = (value?: string) => {
   if (!value) return Date.now();
@@ -137,10 +140,11 @@ export async function logoutBackend() {
 
 export async function refreshSeaShieldBackend() {
   const sequence = ++refreshSequence;
-  const [health, vessels, cameras, events, incidents, safetyRounds, safetyFindings] =
+  const [health, vessels, fleet, cameras, events, incidents, safetyRounds, safetyFindings] =
     await Promise.all([
       request<{ status: string }>("/health"),
       request<ApiVessel[]>("/api/v1/vessels"),
+      request<ApiFleetSummary>("/api/v1/fleet/security-summary"),
       request<ApiCamera[]>("/api/v1/cameras"),
       request<ApiEvent[]>("/api/security-events?limit=100"),
       request<ApiIncident[]>("/api/v1/incidents"),
@@ -155,7 +159,7 @@ export async function refreshSeaShieldBackend() {
       name: v.name,
       imo: v.imo,
       score: v.score,
-      state: stateFor(v.score),
+      state: securityStateFromApi(v.status),
       lastComms: dateMs(v.last_communication),
     })),
     cameras: cameras.map((c) => ({
@@ -218,6 +222,10 @@ export async function refreshSeaShieldBackend() {
     })),
     safetyRounds,
     safetyFindings,
+    fleetAverage:
+      fleet.average_score === null
+        ? null
+        : { score: fleet.average_score, state: securityStateFromApi(fleet.average_status) },
   });
 }
 
