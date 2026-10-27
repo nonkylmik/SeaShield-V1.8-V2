@@ -11,6 +11,7 @@ import {
   KeyRound,
   LayoutDashboard,
   LogOut,
+  Map as MapIcon,
   Radar,
   Search,
   Settings,
@@ -37,6 +38,8 @@ type AuthState = { required: boolean; authenticated: boolean };
 const NAV = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, key: "F1" },
   { to: "/fleet", label: "Fleet", icon: Waves, key: "F2" },
+  // No function-key hint: F1–F11 keep their existing labels.
+  { to: "/map", label: "Tactical Map", icon: MapIcon, key: "" },
   { to: "/vessels", label: "Vessels", icon: Ship, key: "F3" },
   { to: "/cameras", label: "Cameras", icon: Camera, key: "F4" },
   { to: "/cybersecurity", label: "Cybersecurity", icon: ShieldHalf, key: "F5" },

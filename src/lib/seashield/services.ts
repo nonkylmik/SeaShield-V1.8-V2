@@ -4,6 +4,7 @@ import {
   acknowledgeBackendEvent,
   addBackendIncidentNote,
   createBackendIncident,
+  fetchVesselPositions,
   refreshSeaShieldBackend,
   reopenBackendIncident,
   resetBackendSimulation,
@@ -49,6 +50,11 @@ export const vesselService = {
   list: (): Vessel[] => store.getState().vessels,
   get: (id: string): Vessel | undefined => store.getState().vessels.find((v) => v.id === id),
   select: (id: string | "all") => store.selectVessel(id),
+};
+
+export const positionService = {
+  /** Simulated positions from the backend; rejects on failure so the map keeps its last good data. */
+  fetch: () => fetchVesselPositions(),
 };
 
 export const cameraService = {

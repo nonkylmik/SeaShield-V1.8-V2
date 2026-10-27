@@ -60,7 +60,6 @@ function FleetView() {
                   "Cyber",
                   "Incidents",
                   "Last comms",
-                  "Position",
                 ].map((h) => (
                   <th key={h} className="label-mono px-3 py-2 text-left font-medium">
                     {h}
@@ -124,7 +123,6 @@ function FleetView() {
                     <td className={cn("tabular px-3 py-2", onlineText[v.network])}>
                       {commsAge(v.lastComms, t, " ago")}
                     </td>
-                    <td className="tabular px-3 py-2 text-muted-foreground">{v.position}</td>
                   </tr>
                 );
               })}

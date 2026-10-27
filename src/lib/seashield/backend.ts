@@ -1,5 +1,6 @@
 import { parseApiTimestamp } from "./freshness";
 import { uiAllowedStatuses } from "./incidentTransitions";
+import { parsePositionsResponse, type PositionsSnapshot } from "./positions";
 import { securityStateFromApi } from "./securityStatus";
 import { simulationLogOutcome, type ApiSimulationLogEntry } from "./simulationLog";
 import { ApiRequestError, errorDetail } from "./writeFailures";
@@ -475,6 +476,11 @@ export async function addBackendIncidentNote(id: string, body: string, author: s
     body: JSON.stringify({ body, author }),
   });
   await refreshAfterWrite();
+}
+
+/** Latest simulated position report per vessel; read on its own schedule, outside the full refresh. */
+export async function fetchVesselPositions(): Promise<PositionsSnapshot> {
+  return parsePositionsResponse(await request<unknown>("/api/v1/vessels/positions"));
 }
 
 export async function acknowledgeBackendEvent(id: string, acknowledgedBy: string) {
