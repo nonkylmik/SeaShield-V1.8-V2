@@ -33,7 +33,7 @@ from simulation.vessel_positions import (
 VESSEL_IDS = ("atlantic-trader", "baltic-guardian", "calypso", "iron-horizon", "northern-star", "ocean-sentinel")
 NOW = datetime(2026, 10, 27, 12, 4, 10, tzinfo=timezone.utc)
 # 10 degrees of longitude along the equator: 600 nm each way, so 12 hours per leg at 50 kn.
-EQUATOR = VesselRoute(speed_kn=50, waypoints=(Waypoint(lat=0, lon=0), Waypoint(lat=0, lon=10)))
+EQUATOR = VesselRoute(label="Test equator loop", speed_kn=50, waypoints=(Waypoint(lat=0, lon=0), Waypoint(lat=0, lon=10)))
 
 
 def at(hour: int, minute: int = 0, second: int = 0, day: int = 27) -> datetime:
@@ -59,7 +59,7 @@ def distance_nm(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 
 
 def route_with(*points: tuple[float, float], speed_kn: float = 12) -> VesselRoute:
-    return VesselRoute(speed_kn=speed_kn, waypoints=tuple(Waypoint(lat=lat, lon=lon) for lat, lon in points))
+    return VesselRoute(label="Test route", speed_kn=speed_kn, waypoints=tuple(Waypoint(lat=lat, lon=lon) for lat, lon in points))
 
 
 # --- Report schedule -------------------------------------------------------------------------------------------------

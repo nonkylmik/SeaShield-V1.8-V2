@@ -60,7 +60,7 @@ export function getHydrationState() {
 type BackendPayload = {
   health: string;
   vessels?: Array<
-    Pick<Vessel, "id" | "name" | "imo" | "lastComms"> & {
+    Pick<Vessel, "id" | "name" | "imo" | "lastComms" | "simulatedRoute"> & {
       score: number;
       state: Vessel["securityState"];
     }
@@ -105,6 +105,9 @@ export function hydrateFromBackend(payload: BackendPayload) {
         securityScore: vessel.score,
         securityState: vessel.state,
         lastComms: vessel.lastComms,
+        // The fixture's voyage text belongs to a different, sort-order-assigned vessel: never keep it.
+        route: "",
+        simulatedRoute: vessel.simulatedRoute,
       };
     });
     const attachFixtures = <T extends { vesselId: string }>(fixtures: T[]) =>

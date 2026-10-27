@@ -14,7 +14,7 @@ from datetime import datetime, timedelta, timezone
 from functools import cached_property
 from typing import Annotated, Literal
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StringConstraints, field_validator, model_validator
 
 from models.positions import Freshness, PositionSource, UnavailablePosition, UnavailableReason, VesselPosition, VesselPositionsResponse
 
@@ -40,6 +40,8 @@ class VesselRoute(BaseModel):
 
     model_config = ConfigDict(allow_inf_nan=False, frozen=True)
 
+    # Shown on the vessel pages as the simulated route, so it must describe these waypoints (trimmed, 1-80 characters).
+    label: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=80)]
     speed_kn: float = Field(gt=0, le=50)
     waypoints: tuple[Waypoint, ...] = Field(min_length=2)
 
@@ -123,29 +125,35 @@ class VesselSimulation(BaseModel):
     outages: tuple[Outage, ...] = ()
 
 
-def _route(speed_kn: float, *points: tuple[float, float]) -> VesselRoute:
-    return VesselRoute(speed_kn=speed_kn, waypoints=tuple(Waypoint(lat=lat, lon=lon) for lat, lon in points))
+def _route(label: str, speed_kn: float, *points: tuple[float, float]) -> VesselRoute:
+    return VesselRoute(label=label, speed_kn=speed_kn, waypoints=tuple(Waypoint(lat=lat, lon=lon) for lat, lon in points))
 
 
 # Backend-owned, version-controlled simulation configuration, assigned by vessel ID. Routes are hand-authored sea-lane
 # loops for display; they make no claim of navigational accuracy. The outage windows are simulated, configurable demo
 # scenarios that exercise the STALE and LOST states, not predictions about real vessel communications.
 VESSEL_SIMULATIONS: dict[str, VesselSimulation] = {
-    "baltic-guardian": VesselSimulation(route=_route(14.0, (54.80, 18.90), (55.40, 15.80), (57.30, 19.60), (59.60, 23.00), (57.00, 20.50))),
+    "baltic-guardian": VesselSimulation(route=_route("Baltic loop · Gulf of Gdańsk ↔ Gulf of Finland", 14.0, (54.80, 18.90), (55.40, 15.80), (57.30, 19.60), (59.60, 23.00), (57.00, 20.50))),
     "northern-star": VesselSimulation(
-        route=_route(13.0, (52.00, 3.60), (54.00, 3.50), (57.50, 4.00), (58.80, 5.20), (56.00, 6.00)),
+        route=_route("North Sea loop · Rotterdam ↔ Stavanger", 13.0, (52.00, 3.60), (54.00, 3.50), (57.50, 4.00), (58.80, 5.20), (56.00, 6.00)),
         # Demo: a 30-minute outage at 10 minutes past every UTC hour, so the vessel turns STALE and recovers.
         outages=(RecurringOutage(period=timedelta(hours=1), offset=timedelta(minutes=10), duration=timedelta(minutes=30)),),
     ),
-    "ocean-sentinel": VesselSimulation(route=_route(15.0, (49.80, -3.00), (48.20, -5.70), (45.50, -3.00), (43.50, -9.60), (47.00, -7.00))),
+    "ocean-sentinel": VesselSimulation(route=_route("Channel–Biscay loop · Ushant ↔ Cape Finisterre", 15.0, (49.80, -3.00), (48.20, -5.70), (45.50, -3.00), (43.50, -9.60), (47.00, -7.00))),
     "atlantic-trader": VesselSimulation(
-        route=_route(17.0, (49.50, -6.50), (47.00, -30.00), (44.00, -50.00), (40.40, -69.00), (38.00, -50.00), (40.00, -30.00), (47.50, -9.50)),
+        route=_route("Transatlantic loop · Western Approaches ↔ US north-east coast", 17.0, (49.50, -6.50), (47.00, -30.00), (44.00, -50.00), (40.40, -69.00), (38.00, -50.00), (40.00, -30.00), (47.50, -9.50)),
         # Demo: a 3-hour outage at 02:00 and 14:00 UTC, so the vessel reaches LOST and recovers.
         outages=(RecurringOutage(period=timedelta(hours=12), offset=timedelta(hours=2), duration=timedelta(hours=3)),),
     ),
-    "iron-horizon": VesselSimulation(route=_route(16.0, (36.00, -5.50), (37.50, 2.00), (37.30, 11.50), (34.50, 24.00), (31.80, 32.00), (33.00, 26.00), (35.50, 16.00), (37.00, 0.50))),
-    "calypso": VesselSimulation(route=_route(12.0, (12.55, 43.45), (12.10, 46.00), (12.70, 49.50), (13.20, 52.50), (12.40, 49.00), (11.90, 45.50))),
+    "iron-horizon": VesselSimulation(route=_route("Mediterranean loop · Gibraltar ↔ Port Said", 16.0, (36.00, -5.50), (37.50, 2.00), (37.30, 11.50), (34.50, 24.00), (31.80, 32.00), (33.00, 26.00), (35.50, 16.00), (37.00, 0.50))),
+    "calypso": VesselSimulation(route=_route("Gulf of Aden loop · Bab el-Mandeb ↔ Socotra approaches", 12.0, (12.55, 43.45), (12.10, 46.00), (12.70, 49.50), (13.20, 52.50), (12.40, 49.00), (11.90, 45.50))),
 }
+
+
+def route_label(vessel_id: str) -> str | None:
+    """The configured simulated route's label, or None for a vessel without a route."""
+    simulation = VESSEL_SIMULATIONS.get(vessel_id)
+    return simulation.route.label if simulation else None
 
 
 def _vector(point: Waypoint) -> tuple[float, float, float]:

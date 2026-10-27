@@ -38,13 +38,14 @@ from db.repositories.safety_repository import (
 )
 from db.repositories.security_repository import append_security_score, latest_security_score
 from db.repositories.vessel_repository import get_vessel_record, list_vessel_records, record_vessel_communication, to_vessel_model, upsert_vessel_record
-from models.events import EventCategory, SecurityEvent, Severity
+from models.events import EventCategory, SecurityEvent, Severity, Vessel
 from models.incidents import CLOSED_INCIDENT_STATUSES, INCIDENT_TRANSITIONS, REOPENABLE_STATUSES, Incident, IncidentCreate, IncidentNoteCreate, IncidentReopen, IncidentStatus, IncidentUpdate, allowed_transitions
 from models.positions import VesselPositionsResponse
 from models.safety_rounds import SafetyCheckpointPatch, SafetyCheckpointStatus, SafetyFindingCreate, SafetyFindingUpdate, SafetyRoundCreate
 from models.security_status import average_score, status_for_score
 from schemas.auth import LoginRequest, LoginResponse, UserResponse
 from schemas.security_events import EventAcknowledge, SecurityEventCreate, SecurityEventResponse
+from schemas.vessels import VesselResponse, vessel_response
 from simulation.scenario_manager import MANUAL_INJECTION, SCENARIOS
 from simulation.simulation_engine import SimulationEngine
 from simulation.vessel_positions import fleet_positions
@@ -383,13 +384,18 @@ def auth_config() -> dict[str, bool]:
     return {"auth_required": auth_required()}
 
 
-@app.get("/vessels")
-@app.get("/api/v1/vessels")
-def get_vessels(db: Session = Depends(get_db)):
+def current_vessels(db: Session) -> list[Vessel]:
+    """The fleet: the persisted vessels, or the engine's before any have been persisted."""
     records = list_vessel_records(db)
     if records:
         return [to_vessel_model(record) for record in records]
     return engine.vessels
+
+
+@app.get("/vessels", response_model=list[VesselResponse])
+@app.get("/api/v1/vessels", response_model=list[VesselResponse])
+def get_vessels(db: Session = Depends(get_db)):
+    return [vessel_response(vessel) for vessel in current_vessels(db)]
 
 
 def position_evaluation_time() -> datetime:
@@ -405,7 +411,7 @@ def get_vessel_positions(
     db: Session = Depends(get_db),
 ):
     """Latest simulated position report per vessel. Read-only: computed from the route and outage configuration."""
-    vessel_ids = [vessel.id for vessel in get_vessels(db)]
+    vessel_ids = [vessel.id for vessel in current_vessels(db)]
     if vessel_id is not None:
         if vessel_id not in vessel_ids:
             raise HTTPException(status_code=404, detail="Vessel not found")
@@ -413,21 +419,21 @@ def get_vessel_positions(
     return fleet_positions(vessel_ids, evaluated_at)
 
 
-@app.get("/api/v1/vessels/{vessel_id}")
+@app.get("/api/v1/vessels/{vessel_id}", response_model=VesselResponse)
 def get_vessel(vessel_id: str, db: Session = Depends(get_db)):
     record = get_vessel_record(db, vessel_id)
     if record is None:
         vessel = next((item for item in engine.vessels if item.id == vessel_id), None)
         if vessel is None:
             raise HTTPException(status_code=404, detail="Vessel not found")
-        return vessel
-    return to_vessel_model(record)
+        return vessel_response(vessel)
+    return vessel_response(to_vessel_model(record))
 
 
 @app.get("/api/v1/fleet/security-summary")
 def get_fleet_security_summary(db: Session = Depends(get_db)):
     """The fleet's average score and the canonical classification of that average (not of the worst vessel)."""
-    vessels = get_vessels(db)
+    vessels = current_vessels(db)
     average = average_score([vessel.score for vessel in vessels])
     return {
         "vessel_count": len(vessels),
