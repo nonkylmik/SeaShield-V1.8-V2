@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from fastapi import Cookie, Depends, FastAPI, HTTPException, Query, Response, WebSocket, WebSocketDisconnect
+from fastapi import Cookie, Depends, FastAPI, HTTPException, Query, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -39,7 +39,7 @@ from db.repositories.safety_repository import (
 from db.repositories.security_repository import append_security_score, latest_security_score
 from db.repositories.vessel_repository import get_vessel_record, list_vessel_records, record_vessel_communication, to_vessel_model, upsert_vessel_record
 from models.events import EventCategory, SecurityEvent, Severity
-from models.incidents import Incident, IncidentCreate, IncidentNoteCreate, IncidentStatus, IncidentUpdate
+from models.incidents import CLOSED_INCIDENT_STATUSES, INCIDENT_TRANSITIONS, REOPENABLE_STATUSES, Incident, IncidentCreate, IncidentNoteCreate, IncidentReopen, IncidentStatus, IncidentUpdate, allowed_transitions
 from models.safety_rounds import SafetyCheckpointPatch, SafetyCheckpointStatus, SafetyFindingCreate, SafetyFindingUpdate, SafetyRoundCreate
 from models.security_status import average_score, status_for_score
 from schemas.auth import LoginRequest, LoginResponse, UserResponse
@@ -114,7 +114,18 @@ def incident_payload(db: Session, record: IncidentRecord) -> dict:
         {"id": f"act-{activity.id}", "text": activity.text, "actor": activity.actor, "created_at": activity.created_at}
         for activity in activities
     ] or [{"id": f"{record.incident_id}-opened", "text": "Incident opened.", "actor": None, "created_at": record.created_at}]
+    # The lifecycle rules are the backend's; the UI offers only these.
+    payload["allowed_transitions"] = allowed_transitions(record.status)
+    payload["can_reopen"] = record.status in {status.value for status in REOPENABLE_STATUSES}
     return payload
+
+
+def request_actor(request: Request, claimed: str | None = None) -> str:
+    """Who performed an action: the signed-in user; a claimed name only when there is no session (auth disabled)."""
+    user = read_session(request.cookies.get(SESSION_COOKIE))
+    if user is not None:
+        return user.name
+    return claimed or "Operator"
 
 
 async def broadcast_status_message(message_type: str, data: dict) -> None:
@@ -569,26 +580,58 @@ def get_incident(incident_id: str, db: Session = Depends(get_db)):
 
 @app.patch("/incidents/{incident_id}")
 @app.patch("/api/v1/incidents/{incident_id}")
-async def update_incident(incident_id: str, update: IncidentUpdate, db: Session = Depends(get_db)):
+async def update_incident(incident_id: str, update: IncidentUpdate, request: Request, db: Session = Depends(get_db)):
     record = get_incident_record(db, incident_id)
     if record is None:
         raise HTTPException(status_code=404, detail="Incident not found")
     changes = update.model_dump(exclude_unset=True, exclude={"actor"})
+    if changes.get("status") is not None and changes["status"].value == record.status:
+        del changes["status"]
     if not changes:
         return incident_payload(db, record)
+    if "status" in changes:
+        current, target = IncidentStatus(record.status), changes["status"]
+        if target not in INCIDENT_TRANSITIONS[current]:
+            detail = f"Cannot change incident status from {current.value} to {target.value}"
+            if current in REOPENABLE_STATUSES:
+                detail += "; a closed incident can only be reopened"
+            raise HTTPException(status_code=409, detail=detail)
+    # The update, its activity entry, any resolved evidence and the recalculated scores commit together.
     updated = update_incident_record(
         db,
         incident_id,
-        status=update.status.value if update.status is not None else None,
+        status=changes["status"].value if "status" in changes else None,
         investigation_notes=update.investigation_notes,
         assigned_operator=update.assigned_operator,
         severity=update.severity.value if update.severity is not None else None,
+        commit=False,
     )
     change_text = ", ".join(f"{key} → {value.value if hasattr(value, 'value') else value}" for key, value in changes.items())
-    add_incident_activity(db, incident_id, f"Operator update: {change_text}.", actor=update.actor or "Operator")
-    if update.status in {IncidentStatus.RESOLVED, IncidentStatus.FALSE_POSITIVE}:
-        set_event_status(db, get_related_event_ids(db, incident_id), "RESOLVED")
-    sync_engine_from_db(db)
+    add_incident_activity(db, incident_id, f"Operator update: {change_text}.", actor=request_actor(request, update.actor), commit=False)
+    if changes.get("status") in CLOSED_INCIDENT_STATUSES:
+        set_event_status(db, get_related_event_ids(db, incident_id), "RESOLVED", commit=False)
+    commit_with_engine_sync(db)
+    await broadcast_status_message("incident_updated", {"incident_id": incident_id, "status": updated.status})
+    return incident_payload(db, updated)
+
+
+@app.post("/api/v1/incidents/{incident_id}/reopen")
+async def reopen_incident(incident_id: str, payload: IncidentReopen, request: Request, db: Session = Depends(get_db)):
+    """Deliberately reopen a closed (RESOLVED or FALSE POSITIVE) incident for investigation.
+
+    Its linked events become OPEN again, so their score penalties return; the reopening is recorded once in the
+    activity timeline with the reason. No evidence links are added.
+    """
+    record = get_incident_record(db, incident_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Incident not found")
+    if record.status not in {status.value for status in REOPENABLE_STATUSES}:
+        raise HTTPException(status_code=409, detail=f"Only a resolved or false-positive incident can be reopened; this one is {record.status}")
+    previous = record.status
+    updated = update_incident_record(db, incident_id, status=IncidentStatus.INVESTIGATING.value, commit=False)
+    set_event_status(db, get_related_event_ids(db, incident_id), "OPEN", commit=False)
+    add_incident_activity(db, incident_id, f"Reopened from {previous}: {payload.reason.strip()}", actor=request_actor(request), commit=False)
+    commit_with_engine_sync(db)
     await broadcast_status_message("incident_updated", {"incident_id": incident_id, "status": updated.status})
     return incident_payload(db, updated)
 

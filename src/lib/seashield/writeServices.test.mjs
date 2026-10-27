@@ -36,6 +36,8 @@ const INCIDENT = {
   eventIds: [],
   notes: [],
   timeline: [],
+  allowedStatuses: ["contained", "closed"],
+  canReopen: false,
 };
 const EVENT = {
   id: "evt-1",
@@ -162,4 +164,39 @@ test("failed simulation actions are shown instead of being lost", async () => {
   assert.equal(lastToast().title, "Run scenario failed");
   assert.equal(await services.simulationService.reset(), false);
   assert.equal(lastToast().title, "Reset simulation failed");
+});
+
+test("a refused reopen is shown and changes nothing", async () => {
+  backend({
+    write: rejected(
+      409,
+      "Only a resolved or false-positive incident can be reopened; this one is INVESTIGATING",
+    ),
+    read: unreachable,
+  });
+
+  assert.equal(await services.incidentService.reopen(INCIDENT.id, "New evidence"), false);
+
+  assert.deepEqual(incident(), INCIDENT);
+  assert.equal(lastToast().title, "Reopen incident failed");
+  assert.match(lastToast().description, /can be reopened/);
+});
+
+test("a reopen the backend accepted is reported as saved", async () => {
+  const requests = [];
+  globalThis.fetch = async (url, options = {}) => {
+    requests.push([options.method ?? "GET", new URL(String(url)).pathname, options.body ?? null]);
+    if ((options.method ?? "GET") === "GET") throw new TypeError("fetch failed");
+    return new Response(JSON.stringify({ incident_id: INCIDENT.id }), { status: 200 });
+  };
+  const historyBefore = toast.getHistory().length;
+
+  assert.equal(await services.incidentService.reopen(INCIDENT.id, "New evidence"), true);
+
+  assert.deepEqual(requests[0], [
+    "POST",
+    `/api/v1/incidents/${INCIDENT.id}/reopen`,
+    JSON.stringify({ reason: "New evidence" }),
+  ]);
+  assert.equal(toast.getHistory().length, historyBefore);
 });

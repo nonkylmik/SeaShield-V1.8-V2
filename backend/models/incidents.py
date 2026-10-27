@@ -45,6 +45,32 @@ class IncidentNoteCreate(BaseModel):
     body: str
 
 
+# Allowed status changes through an ordinary update. RESOLVED and FALSE POSITIVE are closed: they change only
+# through the explicit reopen action, which returns the incident to INVESTIGATING.
+INCIDENT_TRANSITIONS: dict[IncidentStatus, frozenset[IncidentStatus]] = {
+    IncidentStatus.NEW: frozenset({IncidentStatus.INVESTIGATING, IncidentStatus.CONTAINED, IncidentStatus.RESOLVED, IncidentStatus.FALSE_POSITIVE}),
+    IncidentStatus.INVESTIGATING: frozenset({IncidentStatus.CONTAINED, IncidentStatus.RESOLVED, IncidentStatus.FALSE_POSITIVE}),
+    IncidentStatus.CONTAINED: frozenset({IncidentStatus.INVESTIGATING, IncidentStatus.RESOLVED, IncidentStatus.FALSE_POSITIVE}),
+    IncidentStatus.RESOLVED: frozenset(),
+    IncidentStatus.FALSE_POSITIVE: frozenset(),
+}
+REOPENABLE_STATUSES = frozenset({IncidentStatus.RESOLVED, IncidentStatus.FALSE_POSITIVE})
+CLOSED_INCIDENT_STATUSES = REOPENABLE_STATUSES
+
+
+def allowed_transitions(status: str) -> list[str]:
+    """Statuses an ordinary update may move an incident to, in lifecycle order; empty for unknown statuses."""
+    try:
+        allowed = INCIDENT_TRANSITIONS[IncidentStatus(status)]
+    except ValueError:
+        return []
+    return [candidate.value for candidate in IncidentStatus if candidate in allowed]
+
+
+class IncidentReopen(BaseModel):
+    reason: str = Field(min_length=1, max_length=500)
+
+
 class IncidentUpdate(BaseModel):
     status: IncidentStatus | None = None
     severity: Severity | None = None

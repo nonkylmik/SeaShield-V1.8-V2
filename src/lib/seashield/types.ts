@@ -110,6 +110,10 @@ export interface Incident {
   eventIds: string[];
   notes: IncidentNote[];
   timeline: { id: string; ts: number; text: string }[];
+  /** Status changes the backend allows next (empty without backend data). */
+  allowedStatuses: IncidentStatus[];
+  /** True for a closed incident that may be deliberately reopened. */
+  canReopen: boolean;
 }
 
 export type SafetyRoundStatus = "PLANNED" | "IN_PROGRESS" | "OVERDUE" | "COMPLETED" | "CANCELLED";

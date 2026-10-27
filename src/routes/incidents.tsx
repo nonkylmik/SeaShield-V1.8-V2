@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { Plus } from "lucide-react";
+import { statusOptions } from "@/lib/seashield/incidentTransitions";
 import { incidentService } from "@/lib/seashield/services";
 import { useSeaShield } from "@/lib/seashield/useSeaShield";
 import { severityText, utcStamp, utcTime } from "@/lib/seashield/format";
@@ -28,7 +29,6 @@ export const Route = createFileRoute("/incidents")({
   component: IncidentsView,
 });
 
-const STATUSES: IncidentStatus[] = ["open", "investigating", "contained", "closed"];
 const SEVERITIES: Severity[] = ["critical", "high", "medium", "low", "info"];
 const ASSIGNEES = ["R. Vance", "K. Halvorsen", "M. Okonjo", "D. Reyes", "S. Lindqvist"];
 
@@ -143,14 +143,16 @@ function IncidentsView() {
                   </select>
                 </Field>
                 <Field label="Status">
+                  {/* Only the changes the backend allows; a closed incident is reopened below. */}
                   <select
                     value={selected.status}
+                    disabled={selected.allowedStatuses.length === 0}
                     onChange={(e) =>
                       incidentService.setStatus(selected.id, e.target.value as IncidentStatus)
                     }
-                    className="h-7 w-full rounded-sm border border-input bg-background px-1 font-mono text-xs"
+                    className="h-7 w-full rounded-sm border border-input bg-background px-1 font-mono text-xs disabled:opacity-60"
                   >
-                    {STATUSES.map((s) => (
+                    {statusOptions(selected.status, selected.allowedStatuses).map((s) => (
                       <option key={s} value={s}>
                         {s}
                       </option>
@@ -173,6 +175,10 @@ function IncidentsView() {
                   </select>
                 </Field>
               </div>
+
+              {selected.canReopen ? (
+                <ReopenForm key={selected.id} incidentId={selected.id} />
+              ) : null}
 
               <Section title="Timeline">
                 <ol className="space-y-1.5 border-l border-border pl-3">
@@ -247,6 +253,44 @@ function IncidentsView() {
         )}
       </div>
     </div>
+  );
+}
+
+/** Reopening is a deliberate action with a recorded reason, not an ordinary status change. */
+function ReopenForm({ incidentId }: { incidentId: string }) {
+  const [reason, setReason] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  return (
+    <form
+      onSubmit={async (e) => {
+        e.preventDefault();
+        if (!reason.trim() || saving) return;
+        setSaving(true);
+        const reopened = await incidentService.reopen(incidentId, reason.trim());
+        setSaving(false);
+        if (reopened) setReason("");
+      }}
+      className="flex items-end gap-2 border border-border bg-panel p-2"
+    >
+      <label className="min-w-0 flex-1">
+        <span className="label-mono">Reopen with reason</span>
+        <input
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          maxLength={500}
+          placeholder="Why the investigation must continue"
+          className="h-7 w-full rounded-sm border border-input bg-background px-2 text-xs outline-none focus:border-ring"
+        />
+      </label>
+      <button
+        type="submit"
+        disabled={saving || !reason.trim()}
+        className="label-mono h-7 border border-warning/50 bg-warning/10 px-3 text-warning hover:bg-warning/20 disabled:opacity-50"
+      >
+        {saving ? "Reopening…" : "Reopen"}
+      </button>
+    </form>
   );
 }
 

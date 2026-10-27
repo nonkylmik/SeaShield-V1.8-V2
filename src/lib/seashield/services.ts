@@ -5,6 +5,7 @@ import {
   addBackendIncidentNote,
   createBackendIncident,
   refreshSeaShieldBackend,
+  reopenBackendIncident,
   resetBackendSimulation,
   runBackendScenario,
   updateBackendIncident,
@@ -106,6 +107,16 @@ export const incidentService = {
       report: (cause) => reportWriteFailure("Update incident", cause),
       reconcile: reconcileWithBackend,
     }),
+  /** Deliberately reopens a closed incident; not optimistic (the backend reopens its evidence too). */
+  reopen: async (id: string, reason: string): Promise<boolean> => {
+    try {
+      await reopenBackendIncident(id, reason);
+      return true;
+    } catch (cause) {
+      reportWriteFailure("Reopen incident", cause);
+      return false;
+    }
+  },
   addNote: (id: string, body: string, author: string) =>
     optimisticWrite({
       apply: () => store.addIncidentNote(id, body, author),

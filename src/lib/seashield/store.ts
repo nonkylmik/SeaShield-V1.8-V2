@@ -248,6 +248,8 @@ export function createIncident(input: {
     openedAt: now(),
     updatedAt: now(),
     eventIds: input.eventIds ?? [],
+    allowedStatuses: [],
+    canReopen: false,
     notes: [],
     timeline: [
       {
