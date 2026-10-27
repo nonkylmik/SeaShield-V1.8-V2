@@ -40,12 +40,14 @@ from db.repositories.security_repository import append_security_score, latest_se
 from db.repositories.vessel_repository import get_vessel_record, list_vessel_records, record_vessel_communication, to_vessel_model, upsert_vessel_record
 from models.events import EventCategory, SecurityEvent, Severity
 from models.incidents import CLOSED_INCIDENT_STATUSES, INCIDENT_TRANSITIONS, REOPENABLE_STATUSES, Incident, IncidentCreate, IncidentNoteCreate, IncidentReopen, IncidentStatus, IncidentUpdate, allowed_transitions
+from models.positions import VesselPositionsResponse
 from models.safety_rounds import SafetyCheckpointPatch, SafetyCheckpointStatus, SafetyFindingCreate, SafetyFindingUpdate, SafetyRoundCreate
 from models.security_status import average_score, status_for_score
 from schemas.auth import LoginRequest, LoginResponse, UserResponse
 from schemas.security_events import EventAcknowledge, SecurityEventCreate, SecurityEventResponse
 from simulation.scenario_manager import MANUAL_INJECTION, SCENARIOS
 from simulation.simulation_engine import SimulationEngine
+from simulation.vessel_positions import fleet_positions
 from websocket_manager import ConnectionManager
 
 APP_VERSION = "1.9.0"
@@ -388,6 +390,27 @@ def get_vessels(db: Session = Depends(get_db)):
     if records:
         return [to_vessel_model(record) for record in records]
     return engine.vessels
+
+
+def position_evaluation_time() -> datetime:
+    """The instant vessel positions are evaluated for; a dependency so tests can pin the clock."""
+    return datetime.now(timezone.utc)
+
+
+# Declared before /api/v1/vessels/{vessel_id}, which would otherwise capture "positions" as a vessel id.
+@app.get("/api/v1/vessels/positions", response_model=VesselPositionsResponse)
+def get_vessel_positions(
+    vessel_id: str | None = Query(default=None, min_length=1, max_length=100),
+    evaluated_at: datetime = Depends(position_evaluation_time),
+    db: Session = Depends(get_db),
+):
+    """Latest simulated position report per vessel. Read-only: computed from the route and outage configuration."""
+    vessel_ids = [vessel.id for vessel in get_vessels(db)]
+    if vessel_id is not None:
+        if vessel_id not in vessel_ids:
+            raise HTTPException(status_code=404, detail="Vessel not found")
+        vessel_ids = [vessel_id]
+    return fleet_positions(vessel_ids, evaluated_at)
 
 
 @app.get("/api/v1/vessels/{vessel_id}")
