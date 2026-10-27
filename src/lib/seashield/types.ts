@@ -209,6 +209,8 @@ export interface SeaShieldState {
   safetyFindings: SafetyFinding[];
   notifications: Notification[];
   simLog: SimulationLogEntry[];
+  /** False when the last refresh could not read the simulation log; simLog then holds the last log received. */
+  simLogAvailable: boolean;
   selectedVesselId: string | "all";
   operator: { name: string; role: string; shift: string };
   connection: { edge: OnlineState; backend: OnlineState; mode: string };

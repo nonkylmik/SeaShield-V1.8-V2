@@ -84,6 +84,17 @@ def list_event_records(
     return list(db.scalars(query).all())
 
 
+def list_events_by_scenario(db: Session, scenarios: list[str], *, limit: int) -> list[SecurityEventRecord]:
+    """Most recent events recorded under the given scenario tags, newest first."""
+    query = (
+        select(SecurityEventRecord)
+        .where(SecurityEventRecord.scenario.in_(scenarios))
+        .order_by(SecurityEventRecord.timestamp.desc(), SecurityEventRecord.id.desc())
+        .limit(limit)
+    )
+    return list(db.scalars(query).all())
+
+
 def get_event_record(db: Session, event_id: str) -> SecurityEventRecord | None:
     return db.scalar(select(SecurityEventRecord).where(SecurityEventRecord.event_id == event_id))
 

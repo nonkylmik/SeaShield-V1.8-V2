@@ -1,5 +1,6 @@
 import { parseApiTimestamp } from "./freshness";
 import { securityStateFromApi } from "./securityStatus";
+import { simulationLogOutcome, type ApiSimulationLogEntry } from "./simulationLog";
 import { ApiRequestError, errorDetail } from "./writeFailures";
 import { appendSafetyRounds, hydrateFromBackend, setOperator } from "./store";
 import type {
@@ -139,17 +140,28 @@ export async function logoutBackend() {
 
 export async function refreshSeaShieldBackend() {
   const sequence = ++refreshSequence;
-  const [health, vessels, fleet, cameras, events, incidents, safetyRounds, safetyFindings] =
-    await Promise.all([
-      request<{ status: string }>("/health"),
-      request<ApiVessel[]>("/api/v1/vessels"),
-      request<ApiFleetSummary>("/api/v1/fleet/security-summary"),
-      request<ApiCamera[]>("/api/v1/cameras"),
-      request<ApiEvent[]>("/api/security-events?limit=100"),
-      request<ApiIncident[]>("/api/v1/incidents"),
-      request<SafetyRound[]>("/api/v1/safety-rounds?limit=100"),
-      request<SafetyFinding[]>("/api/v1/safety-findings?limit=100"),
-    ]);
+  const [
+    health,
+    vessels,
+    fleet,
+    cameras,
+    events,
+    incidents,
+    safetyRounds,
+    safetyFindings,
+    simulationLog,
+  ] = await Promise.all([
+    request<{ status: string }>("/health"),
+    request<ApiVessel[]>("/api/v1/vessels"),
+    request<ApiFleetSummary>("/api/v1/fleet/security-summary"),
+    request<ApiCamera[]>("/api/v1/cameras"),
+    request<ApiEvent[]>("/api/security-events?limit=100"),
+    request<ApiIncident[]>("/api/v1/incidents"),
+    request<SafetyRound[]>("/api/v1/safety-rounds?limit=100"),
+    request<SafetyFinding[]>("/api/v1/safety-findings?limit=100"),
+    // Supplementary: if only the log fails, the rest of the refresh still applies (null = unavailable).
+    request<ApiSimulationLogEntry[]>("/api/v1/simulation/log?limit=40").catch(() => null),
+  ]);
   if (sequence !== refreshSequence) return;
   hydrateFromBackend({
     health: health.status,
@@ -221,6 +233,22 @@ export async function refreshSeaShieldBackend() {
     })),
     safetyRounds,
     safetyFindings,
+    // When the log is unavailable the last log received is kept, not replaced by an empty one.
+    simLogAvailable: simulationLog !== null,
+    ...(simulationLog
+      ? {
+          simLog: simulationLog.map((entry) => ({
+            id: entry.event_id,
+            ts: dateMs(entry.timestamp),
+            scenario: entry.scenario_label,
+            vesselId: entry.vessel_id,
+            outcome: simulationLogOutcome(
+              entry,
+              vessels.find((vessel) => vessel.id === entry.vessel_id)?.name ?? entry.vessel_id,
+            ),
+          })),
+        }
+      : {}),
     fleetAverage:
       fleet.average_score === null
         ? null

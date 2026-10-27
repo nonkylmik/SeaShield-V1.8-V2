@@ -14,8 +14,8 @@ from auth import SESSION_COOKIE, SESSION_TTL_SECONDS, auth_required, authenticat
 from db.database import Base, SessionLocal, engine as db_engine, get_db
 from db.events import create_event, from_record, get_event, list_events, load_events
 from db.models import IncidentRecord, VesselRecord
-from db.repositories.event_repository import acknowledge_event, acknowledged_event_ids, create_event_record, delete_event_record, list_event_records, resolve_all_open_events, resolve_safety_finding_events, set_event_status
-from db.repositories.incident_repository import add_incident_activity, add_incident_note, close_open_incident_records, create_incident_record, get_incident_record, get_linked_incident_ids, get_related_event_ids, list_incident_activity, list_incident_notes, list_incident_records, next_incident_id, update_incident_record
+from db.repositories.event_repository import acknowledge_event, acknowledged_event_ids, create_event_record, delete_event_record, list_event_records, list_events_by_scenario, resolve_all_open_events, resolve_safety_finding_events, set_event_status
+from db.repositories.incident_repository import add_incident_activity, add_incident_note, close_open_incident_records, create_incident_record, get_incident_record, get_linked_incident_ids, get_related_event_ids, linked_incident_ids_by_event, list_incident_activity, list_incident_notes, list_incident_records, next_incident_id, update_incident_record
 from db.repositories.safety_repository import (
     CLOSED_FINDING_STATUSES,
     cancel_safety_round,
@@ -44,6 +44,7 @@ from models.safety_rounds import SafetyCheckpointPatch, SafetyCheckpointStatus, 
 from models.security_status import average_score, status_for_score
 from schemas.auth import LoginRequest, LoginResponse, UserResponse
 from schemas.security_events import EventAcknowledge, SecurityEventCreate, SecurityEventResponse
+from simulation.scenario_manager import MANUAL_INJECTION, SCENARIOS
 from simulation.simulation_engine import SimulationEngine
 from websocket_manager import ConnectionManager
 
@@ -628,6 +629,28 @@ def simulation_status():
     return {"scenario": engine.scenarios.name, "status": engine.scenarios.status, "index": engine.scenarios.index}
 
 
+@app.get("/api/v1/simulation/log")
+def simulation_log(limit: int = Query(40, ge=1, le=200), db: Session = Depends(get_db)):
+    """What the simulation recorded: scenario steps and manual injections, newest first, with any incident each
+    event was correlated into. Safety-round reports and events ingested over REST are not simulation actions."""
+    records = list_events_by_scenario(db, [MANUAL_INJECTION, *SCENARIOS], limit=limit)
+    incidents = linked_incident_ids_by_event(db, [record.event_id for record in records])
+    return [
+        {
+            "event_id": record.event_id,
+            "timestamp": record.timestamp,
+            "vessel_id": record.vessel_id,
+            "event_type": record.event_type,
+            "severity": record.severity,
+            "status": record.status,
+            "scenario": record.scenario,
+            "scenario_label": SCENARIOS[record.scenario].name if record.scenario in SCENARIOS else "Manual injection",
+            "incident_ids": incidents.get(record.event_id, []),
+        }
+        for record in records
+    ]
+
+
 @app.get("/api/v1/safety-rounds")
 def get_safety_rounds_endpoint(
     vessel_id: str | None = None,
@@ -1049,7 +1072,7 @@ async def inject_simulation_event(payload: InjectEventRequest, db: Session = Dep
         raise HTTPException(status_code=404, detail="Vessel not found") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return persist_result(db, result, "manual-injection")
+    return persist_result(db, result, MANUAL_INJECTION)
 
 
 @app.post("/simulation/pause")

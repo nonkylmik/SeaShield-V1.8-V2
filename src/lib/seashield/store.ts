@@ -7,6 +7,7 @@ import type {
   SafetyFinding,
   SafetyRound,
   Severity,
+  SimulationLogEntry,
   Vessel,
 } from "./types";
 
@@ -77,6 +78,8 @@ type BackendPayload = {
   safetyRounds?: SafetyRound[];
   safetyFindings?: SafetyFinding[];
   fleetAverage?: SeaShieldState["fleetAverage"];
+  simLog?: SimulationLogEntry[];
+  simLogAvailable?: boolean;
 };
 
 /** Applies V1.8 FastAPI data while retaining V2-only visual telemetry fixtures. */
@@ -131,6 +134,8 @@ export function hydrateFromBackend(payload: BackendPayload) {
   if (payload.safetyRounds) state.safetyRounds = payload.safetyRounds;
   if (payload.safetyFindings) state.safetyFindings = payload.safetyFindings;
   if (payload.fleetAverage !== undefined) state.fleetAverage = payload.fleetAverage;
+  if (payload.simLog) state.simLog = payload.simLog;
+  if (payload.simLogAvailable !== undefined) state.simLogAvailable = payload.simLogAvailable;
   state.connection = {
     ...state.connection,
     backend: payload.health === "ok" ? "online" : "degraded",

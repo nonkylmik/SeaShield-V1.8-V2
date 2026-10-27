@@ -103,6 +103,16 @@ def get_related_event_ids(db: Session, incident_id: str) -> list[str]:
     return list(rows)
 
 
+def linked_incident_ids_by_event(db: Session, event_ids: list[str]) -> dict[str, list[str]]:
+    if not event_ids:
+        return {}
+    links: dict[str, list[str]] = {}
+    rows = db.execute(select(IncidentEventLink.event_id, IncidentEventLink.incident_id).where(IncidentEventLink.event_id.in_(event_ids)).order_by(IncidentEventLink.incident_id)).all()
+    for event_id, incident_id in rows:
+        links.setdefault(event_id, []).append(incident_id)
+    return links
+
+
 def get_linked_incident_ids(db: Session, event_id: str) -> list[str]:
     rows = db.scalars(select(IncidentEventLink.incident_id).where(IncidentEventLink.event_id == event_id).order_by(IncidentEventLink.incident_id)).all()
     return list(dict.fromkeys(rows))
