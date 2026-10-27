@@ -1,5 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useSeaShield } from "@/lib/seashield/useSeaShield";
+import { voyageText } from "@/lib/seashield/voyage";
 import { commsAge, onlineText, stateColor } from "@/lib/seashield/format";
 import {
   PageHeader,
@@ -87,7 +88,7 @@ function VesselsIndex() {
                     <dd className="tabular text-muted-foreground">{commsAge(v.lastComms, t)}</dd>
                   </div>
                 </dl>
-                <div className="mt-auto label-mono normal-case">{v.route}</div>
+                <div className="mt-auto label-mono normal-case">{voyageText(v, dataSource)}</div>
               </div>
             </Panel>
           </Link>

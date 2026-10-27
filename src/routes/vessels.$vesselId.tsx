@@ -1,6 +1,7 @@
 import { createFileRoute, Link, notFound } from "@tanstack/react-router";
 import { ArrowLeft } from "lucide-react";
 import { useSeaShield } from "@/lib/seashield/useSeaShield";
+import { voyageText } from "@/lib/seashield/voyage";
 import { commsAge, onlineText, severityText, stateColor, utcTime } from "@/lib/seashield/format";
 import {
   Metric,
@@ -68,7 +69,7 @@ function VesselDetail() {
     <div className="flex min-h-0 flex-1 flex-col">
       <PageHeader
         title={vessel.name}
-        subtitle={`${vessel.imo} · ${vessel.type} · ${vessel.flag} · ${vessel.route}`}
+        subtitle={`${vessel.imo} · ${vessel.type} · ${vessel.flag} · ${voyageText(vessel, dataSource)}`}
         actions={
           <div className="flex items-center gap-2">
             <SimBanner />

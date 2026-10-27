@@ -27,6 +27,8 @@ type ApiVessel = {
   score: number;
   status: string;
   last_communication?: string;
+  /** Label of the vessel's simulated route from the backend route configuration; null without one. */
+  route_label?: string | null;
 };
 type ApiFleetSummary = {
   vessel_count: number;
@@ -176,6 +178,8 @@ export async function refreshSeaShieldBackend() {
       score: v.score,
       state: securityStateFromApi(v.status),
       lastComms: parseApiTimestamp(v.last_communication),
+      simulatedRoute:
+        typeof v.route_label === "string" && v.route_label.trim() ? v.route_label.trim() : null,
     })),
     cameras: cameras.map((c) => ({
       id: c.id,

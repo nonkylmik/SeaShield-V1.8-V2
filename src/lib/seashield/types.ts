@@ -73,7 +73,10 @@ export interface Vessel {
   imo: string;
   type: string;
   flag: string;
+  /** Seed-fixture voyage text; shown only for seed data, never for backend vessels (see voyageText). */
   route: string;
+  /** Label of the backend's simulated route for this vessel; null in seed data or when it has no route. */
+  simulatedRoute: string | null;
   position: string;
   /** Epoch ms of the vessel's last communication; null when unknown. */
   lastComms: number | null;

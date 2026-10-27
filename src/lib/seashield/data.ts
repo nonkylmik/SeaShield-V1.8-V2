@@ -166,6 +166,7 @@ export function buildSeedState(): SeaShieldState {
     type: v.type,
     flag: v.flag,
     route: v.route,
+    simulatedRoute: null,
     position: v.position,
     lastComms: SIM_EPOCH - int(20, 900) * 1000,
     securityState: v.state,
