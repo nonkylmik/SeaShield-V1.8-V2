@@ -89,6 +89,7 @@ API docs are available at `http://localhost:8000/docs`.
 - `GET /api/v1/incidents`
 - `GET /api/v1/incidents/{incident_id}`
 - `PATCH /api/v1/incidents/{incident_id}`
+- `POST /api/v1/incidents/{incident_id}/reopen` with `{ "reason": "..." }`
 - `GET /api/v1/simulation/status`
 - `GET /api/v1/simulation/log?limit=40`
 - `POST /api/v1/simulation/start` with `{ "scenario": "cyber|physical|systems" }`
@@ -109,6 +110,19 @@ API docs are available at `http://localhost:8000/docs`.
 | `CRITICAL` | 0–54    |
 
 This changed in V4: earlier versions returned only `SECURE` (85–100), `WARNING` (60–84) and `CRITICAL` (0–59). The frontend is the only client and is deployed together with the backend; before any third-party client depends on `/api/v1`, a change like this needs explicit versioning or a compatibility plan.
+
+### Incident lifecycle
+
+`PATCH /api/v1/incidents/{incident_id}` changes status only along these transitions (`models/incidents.py`); any other status change returns 409 and changes nothing:
+
+| From                         | To                                                         |
+| ---------------------------- | ---------------------------------------------------------- |
+| `NEW`                        | `INVESTIGATING`, `CONTAINED`, `RESOLVED`, `FALSE POSITIVE` |
+| `INVESTIGATING`              | `CONTAINED`, `RESOLVED`, `FALSE POSITIVE`                  |
+| `CONTAINED`                  | `INVESTIGATING`, `RESOLVED`, `FALSE POSITIVE`              |
+| `RESOLVED`, `FALSE POSITIVE` | closed: only `POST .../reopen`                             |
+
+Closing an incident resolves its linked events. `POST /api/v1/incidents/{incident_id}/reopen` (a required `reason`, up to 500 characters) returns a `RESOLVED` or `FALSE POSITIVE` incident to `INVESTIGATING`, reopens its linked events so their score penalties return, and records one activity entry with the reason; it adds no evidence links and returns 409 for an incident that is not closed. Status changes and reopening commit together with the recalculated scores. Activity entries record the signed-in user; a name in the request is used only when authentication is disabled. Every incident payload includes `allowed_transitions` and `can_reopen`, which the UI uses to offer only valid actions.
 
 ### Vessel last communication
 

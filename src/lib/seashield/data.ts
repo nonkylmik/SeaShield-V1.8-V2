@@ -411,6 +411,8 @@ function makeIncident(
     openedAt,
     updatedAt: openedAt + 600_000,
     eventIds: [],
+    allowedStatuses: [],
+    canReopen: false,
     notes: [
       {
         id: `${ref}-n1`,

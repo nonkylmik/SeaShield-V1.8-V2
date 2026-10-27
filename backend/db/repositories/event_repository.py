@@ -108,11 +108,12 @@ def delete_event_record(db: Session, event_id: str, *, commit: bool = True) -> b
     return result.rowcount > 0
 
 
-def set_event_status(db: Session, event_ids: list[str], status: str) -> int:
+def set_event_status(db: Session, event_ids: list[str], status: str, *, commit: bool = True) -> int:
     if not event_ids:
         return 0
     result = db.execute(update(SecurityEventRecord).where(SecurityEventRecord.event_id.in_(event_ids)).values(status=status))
-    db.commit()
+    if commit:
+        db.commit()
     return result.rowcount
 
 

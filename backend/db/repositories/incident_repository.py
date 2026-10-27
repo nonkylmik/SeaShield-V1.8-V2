@@ -126,6 +126,7 @@ def update_incident_record(
     investigation_notes: str | None = None,
     assigned_operator: str | None = None,
     severity: str | None = None,
+    commit: bool = True,
 ) -> IncidentRecord | None:
     record = get_incident_record(db, incident_id)
     if record is None:
@@ -139,8 +140,11 @@ def update_incident_record(
     if severity is not None:
         record.severity = severity
     record.updated_at = datetime.now(timezone.utc)
-    db.commit()
-    db.refresh(record)
+    if commit:
+        db.commit()
+        db.refresh(record)
+    else:
+        db.flush()
     return record
 
 
@@ -177,11 +181,14 @@ def list_incident_notes(db: Session, incident_id: str) -> list[IncidentNoteRecor
     return list(db.scalars(select(IncidentNoteRecord).where(IncidentNoteRecord.incident_id == incident_id).order_by(IncidentNoteRecord.created_at.asc())).all())
 
 
-def add_incident_activity(db: Session, incident_id: str, text: str, *, actor: str | None = None) -> IncidentActivityRecord:
+def add_incident_activity(db: Session, incident_id: str, text: str, *, actor: str | None = None, commit: bool = True) -> IncidentActivityRecord:
     activity = IncidentActivityRecord(incident_id=incident_id, text=text, actor=actor)
     db.add(activity)
-    db.commit()
-    db.refresh(activity)
+    if commit:
+        db.commit()
+        db.refresh(activity)
+    else:
+        db.flush()
     return activity
 
 

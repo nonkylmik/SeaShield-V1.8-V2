@@ -1,4 +1,5 @@
 import { parseApiTimestamp } from "./freshness";
+import { uiAllowedStatuses } from "./incidentTransitions";
 import { securityStateFromApi } from "./securityStatus";
 import { simulationLogOutcome, type ApiSimulationLogEntry } from "./simulationLog";
 import { ApiRequestError, errorDetail } from "./writeFailures";
@@ -63,6 +64,8 @@ type ApiIncident = {
   created_at: string;
   updated_at: string;
   related_event_ids?: string[];
+  allowed_transitions?: string[];
+  can_reopen?: boolean;
   assigned_operator?: string;
   investigation_notes?: string;
   notes?: Array<{ note_id: string; author: string; body: string; created_at: string }>;
@@ -204,6 +207,8 @@ export async function refreshSeaShieldBackend() {
       openedAt: dateMs(i.created_at),
       updatedAt: dateMs(i.updated_at),
       eventIds: i.related_event_ids ?? [],
+      allowedStatuses: uiAllowedStatuses(i.allowed_transitions),
+      canReopen: i.can_reopen ?? false,
       notes: i.notes?.length
         ? i.notes.map((note) => ({
             id: note.note_id,
@@ -431,6 +436,14 @@ export async function updateBackendIncident(
       ...(patch.assignee ? { assigned_operator: patch.assignee } : {}),
       ...(actor ? { actor } : {}),
     }),
+  });
+  await refreshAfterWrite();
+}
+
+export async function reopenBackendIncident(id: string, reason: string) {
+  await request(`/api/v1/incidents/${encodeURIComponent(id)}/reopen`, {
+    method: "POST",
+    body: JSON.stringify({ reason }),
   });
   await refreshAfterWrite();
 }
