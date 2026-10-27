@@ -172,6 +172,33 @@ def test_reopen_requires_a_reason_and_an_existing_incident(client):
     assert incident(test_client, incident_id)["status"] == "RESOLVED"
 
 
+@pytest.mark.parametrize("reason", ["   ", "\t\n ", " " * 501])
+def test_a_blank_reopen_reason_is_rejected_and_changes_nothing(client, reason):
+    test_client, sessions = client
+    incident_id, event_ids = correlated_incident(test_client)
+    put_in_status(test_client, incident_id, "RESOLVED")
+    before = incident(test_client, incident_id)
+    events_before = event_statuses(test_client, event_ids)
+    score_before = calypso_score(test_client, sessions)
+
+    response = test_client.post(f"/api/v1/incidents/{incident_id}/reopen", json={"reason": reason})
+
+    assert response.status_code == 422
+    assert incident(test_client, incident_id) == before
+    assert event_statuses(test_client, event_ids) == events_before
+    assert calypso_score(test_client, sessions) == score_before
+
+
+def test_reopen_reason_limit_applies_to_the_trimmed_text(client):
+    test_client, _ = client
+    incident_id, _ = correlated_incident(test_client)
+    put_in_status(test_client, incident_id, "RESOLVED")
+
+    assert test_client.post(f"/api/v1/incidents/{incident_id}/reopen", json={"reason": "x" * 501}).status_code == 422
+    assert test_client.post(f"/api/v1/incidents/{incident_id}/reopen", json={"reason": "  " + "x" * 500 + "  "}).status_code == 200
+    assert incident(test_client, incident_id)["timeline"][-1]["text"] == "Reopened from RESOLVED: " + "x" * 500
+
+
 def test_the_signed_in_user_is_recorded_not_a_claimed_name(client, monkeypatch):
     test_client, _ = client
     incident_id, _ = correlated_incident(test_client)

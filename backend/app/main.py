@@ -630,7 +630,7 @@ async def reopen_incident(incident_id: str, payload: IncidentReopen, request: Re
     previous = record.status
     updated = update_incident_record(db, incident_id, status=IncidentStatus.INVESTIGATING.value, commit=False)
     set_event_status(db, get_related_event_ids(db, incident_id), "OPEN", commit=False)
-    add_incident_activity(db, incident_id, f"Reopened from {previous}: {payload.reason.strip()}", actor=request_actor(request), commit=False)
+    add_incident_activity(db, incident_id, f"Reopened from {previous}: {payload.reason}", actor=request_actor(request), commit=False)
     commit_with_engine_sync(db)
     await broadcast_status_message("incident_updated", {"incident_id": incident_id, "status": updated.status})
     return incident_payload(db, updated)

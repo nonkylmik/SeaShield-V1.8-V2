@@ -1,7 +1,8 @@
 from datetime import datetime, timezone
 from enum import Enum
+from typing import Annotated
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 
 from models.events import Severity
 
@@ -68,7 +69,8 @@ def allowed_transitions(status: str) -> list[str]:
 
 
 class IncidentReopen(BaseModel):
-    reason: str = Field(min_length=1, max_length=500)
+    # Trimmed before the length check, so a whitespace-only reason is rejected (422) instead of recorded empty.
+    reason: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
 
 
 class IncidentUpdate(BaseModel):
