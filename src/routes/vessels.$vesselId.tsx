@@ -115,7 +115,7 @@ function VesselDetail() {
           />
           <SystemMetric label="Cybersecurity" state={vessel.cyber} />
           <SystemMetric label="Network" online={vessel.network} />
-          <SystemMetric label="GPS / AIS" online={vessel.gpsAis} sub={vessel.position} />
+          <SystemMetric label="GPS / AIS" online={vessel.gpsAis} />
         </div>
 
         <Panel

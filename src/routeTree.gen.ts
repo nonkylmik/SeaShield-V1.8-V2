@@ -15,6 +15,7 @@ import { Route as CamerasRouteImport } from './routes/cameras'
 import { Route as CybersecurityRouteImport } from './routes/cybersecurity'
 import { Route as FleetRouteImport } from './routes/fleet'
 import { Route as IncidentsRouteImport } from './routes/incidents'
+import { Route as MapRouteImport } from './routes/map'
 import { Route as ReportsRouteImport } from './routes/reports'
 import { Route as SafetyRoundsRouteImport } from './routes/safety-rounds'
 import { Route as SensorsRouteImport } from './routes/sensors'
@@ -50,6 +51,11 @@ const FleetRoute = FleetRouteImport.update({
 const IncidentsRoute = IncidentsRouteImport.update({
   id: '/incidents',
   path: '/incidents',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MapRoute = MapRouteImport.update({
+  id: '/map',
+  path: '/map',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ReportsRoute = ReportsRouteImport.update({
@@ -90,6 +96,7 @@ export interface FileRoutesByFullPath {
   '/cybersecurity': typeof CybersecurityRoute
   '/fleet': typeof FleetRoute
   '/incidents': typeof IncidentsRoute
+  '/map': typeof MapRoute
   '/reports': typeof ReportsRoute
   '/safety-rounds': typeof SafetyRoundsRoute
   '/sensors': typeof SensorsRoute
@@ -104,6 +111,7 @@ export interface FileRoutesByTo {
   '/cybersecurity': typeof CybersecurityRoute
   '/fleet': typeof FleetRoute
   '/incidents': typeof IncidentsRoute
+  '/map': typeof MapRoute
   '/reports': typeof ReportsRoute
   '/safety-rounds': typeof SafetyRoundsRoute
   '/sensors': typeof SensorsRoute
@@ -119,6 +127,7 @@ export interface FileRoutesById {
   '/cybersecurity': typeof CybersecurityRoute
   '/fleet': typeof FleetRoute
   '/incidents': typeof IncidentsRoute
+  '/map': typeof MapRoute
   '/reports': typeof ReportsRoute
   '/safety-rounds': typeof SafetyRoundsRoute
   '/sensors': typeof SensorsRoute
@@ -135,6 +144,7 @@ export interface FileRouteTypes {
     | '/cybersecurity'
     | '/fleet'
     | '/incidents'
+    | '/map'
     | '/reports'
     | '/safety-rounds'
     | '/sensors'
@@ -149,6 +159,7 @@ export interface FileRouteTypes {
     | '/cybersecurity'
     | '/fleet'
     | '/incidents'
+    | '/map'
     | '/reports'
     | '/safety-rounds'
     | '/sensors'
@@ -163,6 +174,7 @@ export interface FileRouteTypes {
     | '/cybersecurity'
     | '/fleet'
     | '/incidents'
+    | '/map'
     | '/reports'
     | '/safety-rounds'
     | '/sensors'
@@ -178,6 +190,7 @@ export interface RootRouteChildren {
   CybersecurityRoute: typeof CybersecurityRoute
   FleetRoute: typeof FleetRoute
   IncidentsRoute: typeof IncidentsRoute
+  MapRoute: typeof MapRoute
   ReportsRoute: typeof ReportsRoute
   SafetyRoundsRoute: typeof SafetyRoundsRoute
   SensorsRoute: typeof SensorsRoute
@@ -228,6 +241,13 @@ declare module '@tanstack/react-router' {
       path: '/incidents'
       fullPath: '/incidents'
       preLoaderRoute: typeof IncidentsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/map': {
+      id: '/map'
+      path: '/map'
+      fullPath: '/map'
+      preLoaderRoute: typeof MapRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/reports': {
@@ -282,6 +302,7 @@ const rootRouteChildren: RootRouteChildren = {
   CybersecurityRoute: CybersecurityRoute,
   FleetRoute: FleetRoute,
   IncidentsRoute: IncidentsRoute,
+  MapRoute: MapRoute,
   ReportsRoute: ReportsRoute,
   SafetyRoundsRoute: SafetyRoundsRoute,
   SensorsRoute: SensorsRoute,
