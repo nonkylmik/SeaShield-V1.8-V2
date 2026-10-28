@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { RadioTower, Search } from "lucide-react";
+import { RadioTower, Search, X } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { FleetMap, type CenterRequest } from "@/components/seashield/FleetMap";
 import {
@@ -23,16 +23,12 @@ import {
   matchesQuery,
   NO_FILTERS,
   startPositionPolling,
-  unavailableLabel,
   type MapFilters,
   type MapRow,
   type PositionFeed,
 } from "@/lib/seashield/mapModel";
-import {
-  reportAgeMs,
-  type PositionFreshness,
-  type PositionsSnapshot,
-} from "@/lib/seashield/positions";
+import type { PositionFreshness } from "@/lib/seashield/positions";
+import { positionStatusText, vesselContext } from "@/lib/seashield/vesselContext";
 import { positionService, vesselService } from "@/lib/seashield/services";
 import type { SecurityState, Severity } from "@/lib/seashield/types";
 import { useSeaShield } from "@/lib/seashield/useSeaShield";
@@ -221,7 +217,12 @@ function MapView() {
             </ul>
           </Panel>
           {selected ? (
-            <VesselDetail row={selected} snapshot={feed.snapshot} />
+            <VesselDetail
+              key={selected.id}
+              row={selected}
+              feed={feed}
+              backendOnline={backend === "online"}
+            />
           ) : (
             <Panel title="Vessel detail" className="shrink-0">
               <p className="label-mono px-3 py-3 normal-case">
@@ -390,18 +391,43 @@ function PositionBadge({ row }: { row: MapRow }) {
 const coordinate = (value: number, positive: string, negative: string) =>
   `${Math.abs(value).toFixed(5)}° ${value >= 0 ? positive : negative}`;
 
-function VesselDetail({ row, snapshot }: { row: MapRow; snapshot: PositionsSnapshot | null }) {
+function VesselDetail({
+  row,
+  feed,
+  backendOnline,
+}: {
+  row: MapRow;
+  feed: PositionFeed;
+  backendOnline: boolean;
+}) {
   const vessel = useSeaShield((s) => s.vessels.find((v) => v.id === row.id));
+  const dataSource = useSeaShield((s) => s.dataSource);
   const incidents = useSeaShield((s) => s.incidents);
   const events = useSeaShield((s) => s.events);
   const simLog = useSeaShield((s) => s.simLog);
   const openIncidents = incidents.filter((i) => i.vesselId === row.id && i.status !== "closed");
   const latestEvents = events.filter((e) => e.vesselId === row.id).slice(0, 3);
   const logEntries = simLog.filter((entry) => entry.vesselId === row.id).slice(0, 3);
-  const position = row.position;
+  const context = vesselContext({ row, vessel, dataSource, feed, backendOnline });
+  const position = context.position;
 
   return (
-    <Panel title={row.name} meta={row.imo || row.id} className="shrink-0">
+    <Panel
+      title={context.name}
+      meta={context.imo || context.vesselId}
+      className="shrink-0"
+      actions={
+        <button
+          type="button"
+          aria-label={`Close vessel context for ${context.name}`}
+          title="Close"
+          onClick={() => vesselService.select("all")}
+          className="rounded-sm p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+        >
+          <X className="size-3.5" />
+        </button>
+      }
+    >
       <dl className="space-y-2 px-3 py-2.5 text-xs">
         <Term label="Security status">
           <span className={cn("font-semibold uppercase", stateColor[row.securityState])}>
@@ -416,17 +442,33 @@ function VesselDetail({ row, snapshot }: { row: MapRow; snapshot: PositionsSnaps
             </div>
           ) : null}
         </Term>
-        {position && snapshot ? (
+        <Term label="Route">
+          <span className={cn(context.route === null && "text-muted-foreground")}>
+            {context.route ?? "—"}
+          </span>
+        </Term>
+        {position.kind === "reported" ? (
           <>
+            {position.live ? null : (
+              <p className="text-warning">
+                Positions not live · last data received, as of {utcStamp(position.evaluatedAt)}
+              </p>
+            )}
             <Term label="Position">
               <span className="tabular">
-                {coordinate(position.lat, "N", "S")}, {coordinate(position.lon, "E", "W")}
+                {coordinate(position.position.lat, "N", "S")},{" "}
+                {coordinate(position.position.lon, "E", "W")}
               </span>
             </Term>
             <Term label="Course / speed">
               <span className="tabular">
-                {position.courseDeg === null ? "—" : `${position.courseDeg.toFixed(1)}°`} ·{" "}
-                {position.speedKn === null ? "—" : `${position.speedKn.toFixed(1)} kn`}
+                {position.position.courseDeg === null
+                  ? "—"
+                  : `${position.position.courseDeg.toFixed(1)}°`}{" "}
+                ·{" "}
+                {position.position.speedKn === null
+                  ? "—"
+                  : `${position.position.speedKn.toFixed(1)} kn`}
               </span>
             </Term>
             <Term label="Position contact">
@@ -434,8 +476,8 @@ function VesselDetail({ row, snapshot }: { row: MapRow; snapshot: PositionsSnaps
             </Term>
             <Term label="Last position report">
               <span className="tabular">
-                {utcStamp(position.positionAt)} · {elapsed(0, reportAgeMs(snapshot, position))} old
-                as of {utcStamp(snapshot.evaluatedAt)}
+                {utcStamp(position.position.positionAt)} · {elapsed(0, position.ageMs)} old as of{" "}
+                {utcStamp(position.evaluatedAt)}
               </span>
             </Term>
             <Term label="Source">
@@ -444,9 +486,7 @@ function VesselDetail({ row, snapshot }: { row: MapRow; snapshot: PositionsSnaps
           </>
         ) : (
           <Term label="Position">
-            <span className="text-muted-foreground">
-              Unavailable · {unavailableLabel[row.unavailable ?? "not-listed"]}
-            </span>
+            <span className="text-muted-foreground">{positionStatusText(position)}</span>
           </Term>
         )}
         <Term label="Last security event recorded">
@@ -481,8 +521,9 @@ function VesselDetail({ row, snapshot }: { row: MapRow; snapshot: PositionsSnaps
       </Section>
       <div className="border-t border-border px-3 py-2">
         <Link
-          to="/vessels/$vesselId"
-          params={{ vesselId: row.id }}
+          to={context.detailLink.to}
+          params={context.detailLink.params}
+          aria-label={`Open vessel page for ${context.name}`}
           className="label-mono hover:text-signal"
         >
           Open vessel page →

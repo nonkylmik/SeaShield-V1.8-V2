@@ -246,7 +246,7 @@ export function FleetMap({
               tabIndex={0}
               aria-label={`${row.name}: ${row.securityState} security status, position ${position.freshness}`}
               aria-pressed={selected}
-              className="cursor-pointer outline-none"
+              className="cursor-pointer outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring focus-visible:outline-solid"
               onPointerDown={(event) => event.stopPropagation()}
               onClick={() => onSelect(row.id)}
               onKeyDown={(event) => {
