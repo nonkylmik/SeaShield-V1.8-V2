@@ -1,0 +1,549 @@
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'self'; object-src 'none'"
+    />
+    <meta name="referrer" content="strict-origin-when-cross-origin" />
+    <title>SeaShield — Maritime intelligence and operational security</title>
+    <meta
+      name="description"
+      content="SeaShield is an early-stage, vessel-centric prototype for maritime awareness and security operations. Prototype map positions are simulated. Maritime organisations can request an early-access demo."
+    />
+    <meta name="theme-color" content="#0B1726" />
+    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="styles.css" />
+    <script type="module" src="main.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+
+    <header class="site-header">
+      <nav class="container nav" aria-label="Main">
+        <a class="brand" href="#top" aria-label="SeaShield, back to top">
+          <svg viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+            <path
+              d="M16 3 5 7v8.2c0 6.6 4.6 11.6 11 13.8 6.4-2.2 11-7.2 11-13.8V7L16 3Z"
+              fill="none"
+              stroke="#72D5F4"
+              stroke-width="2"
+              stroke-linejoin="round"
+            />
+            <path
+              d="M9.5 17.5c2.2-1.6 4.3-1.6 6.5 0s4.3 1.6 6.5 0"
+              fill="none"
+              stroke="#E7EDF0"
+              stroke-width="2"
+              stroke-linecap="round"
+            />
+          </svg>
+          SeaShield
+        </a>
+        <button
+          class="nav-toggle"
+          type="button"
+          data-nav-toggle
+          aria-expanded="false"
+          aria-controls="site-menu"
+        >
+          Menu
+        </button>
+        <div class="nav-menu" id="site-menu">
+          <ul>
+            <li><a href="#platform">Platform</a></li>
+            <li><a href="#preview">Prototype</a></li>
+            <li><a href="#capabilities">Capabilities</a></li>
+            <li><a href="#faq">FAQ</a></li>
+          </ul>
+          <a class="button button-primary" href="#early-access">Request a demo</a>
+        </div>
+      </nav>
+    </header>
+
+    <main id="main">
+      <section class="hero" id="top" aria-labelledby="hero-title">
+        <div class="container">
+          <div class="hero-copy">
+            <p class="eyebrow">Maritime intelligence &amp; operational security</p>
+            <h1 id="hero-title">
+              See your fleet. Understand the situation. Respond with confidence.
+            </h1>
+            <p class="lead">
+              A vessel-centric approach to maritime awareness and security operations, designed to
+              bring fleet information and operational context into one place.
+            </p>
+            <div class="hero-actions">
+              <a class="button button-primary" href="#early-access">Request an early-access demo</a>
+              <a class="button button-secondary" href="#platform">Explore the platform</a>
+            </div>
+          </div>
+
+          <figure class="shot">
+            <div class="shot-frame">
+              <img
+                src="assets/screens/map-1600.webp"
+                srcset="assets/screens/map-800.webp 800w, assets/screens/map-1600.webp 1600w"
+                sizes="(max-width: 76rem) 100vw, 72rem"
+                width="1600"
+                height="1000"
+                fetchpriority="high"
+                alt="The SeaShield prototype's tactical map: a world map with six fictional demo vessels, a vessel list with security status and position freshness, and the selected vessel's context panel."
+              />
+            </div>
+            <figcaption>
+              <span class="disclosure"
+                >Prototype preview — vessel positions and operational data may be simulated.</span
+              >
+              <span
+                >Screenshot of the SeaShield prototype's tactical map. The vessels, positions and
+                routes are fictional demo data, not real AIS or vessel movements.</span
+              >
+            </figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <section id="problem" aria-labelledby="problem-title">
+        <div class="container">
+          <div class="section-head">
+            <p class="eyebrow">The challenge</p>
+            <h2 id="problem-title">
+              The operational picture is often spread across separate tools.
+            </h2>
+            <p class="lead">
+              Understanding what is happening on a vessel can mean piecing together information that
+              lives in different places. SeaShield is being built to address that.
+            </p>
+          </div>
+          <div class="cards">
+            <article class="card">
+              <h3>Where is the vessel, and how current is that?</h3>
+              <p>
+                A position is only useful if you know when it was reported and whether it is still
+                current.
+              </p>
+            </article>
+            <article class="card">
+              <h3>What is happening on board?</h3>
+              <p>
+                Security events, onboard checks and incidents are often tracked separately from
+                vessel status.
+              </p>
+            </article>
+            <article class="card">
+              <h3>What needs attention first?</h3>
+              <p>
+                Without a shared view, prioritising a response means switching between systems and
+                reconciling them by hand.
+              </p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section id="platform" aria-labelledby="platform-title">
+        <div class="container split">
+          <div class="section-head">
+            <p class="eyebrow">The approach</p>
+            <h2 id="platform-title">One vessel-centric operational view.</h2>
+            <p class="lead">
+              SeaShield organises information around each vessel, so an operator can move from the
+              fleet overview to a single vessel's situation without changing tools.
+            </p>
+          </div>
+          <ul class="checklist">
+            <li>
+              <strong>Vessel information and position context</strong>
+              <span>Identity, latest available position, course and speed in one place.</span>
+            </li>
+            <li>
+              <strong>Freshness and timestamps you can see</strong>
+              <span
+                >Each position shows when it was reported and whether it is current, stale or lost,
+                so an old report is never mistaken for a live one.</span
+              >
+            </li>
+            <li>
+              <strong>Route context where available</strong>
+              <span
+                >The vessel's route is shown when one exists, and nothing is invented when it
+                doesn't.</span
+              >
+            </li>
+            <li>
+              <strong>A path to one security picture</strong>
+              <span
+                >The direction is to connect physical security, cyber events, incidents and fleet
+                operations in the same view. These integrations are planned, not yet built.</span
+              >
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <section id="preview" aria-labelledby="preview-title">
+        <div class="container">
+          <div class="section-head">
+            <p class="eyebrow">The prototype today</p>
+            <h2 id="preview-title">From fleet overview to one vessel's situation.</h2>
+            <p class="lead">
+              The working prototype runs on simulated data. Here is what an operator can do in it
+              today.
+            </p>
+          </div>
+          <div class="preview-grid">
+            <figure class="shot">
+              <div class="shot-frame">
+                <img
+                  src="assets/screens/context-panel.webp"
+                  width="670"
+                  height="1056"
+                  loading="lazy"
+                  decoding="async"
+                  alt="The selected-vessel context panel for the fictional vessel MV Calypso: security status and score, simulated route, position, course and speed, position contact CURRENT, last report time and age, and source SIMULATED."
+                />
+              </div>
+              <figcaption>
+                <span class="disclosure">Prototype preview — simulated data.</span>
+                <span
+                  >The selected-vessel panel. The source of every position is shown as
+                  simulated.</span
+                >
+              </figcaption>
+            </figure>
+            <ol class="steps">
+              <li>
+                <h3>See the fleet on the tactical map</h3>
+                <p>
+                  Each vessel's simulated position is drawn with its security status. Filter by
+                  status, position freshness or open incidents.
+                </p>
+              </li>
+              <li>
+                <h3>Select a vessel for its context</h3>
+                <p>
+                  Position, course and speed, the time of the last report and how old it is, and the
+                  vessel's simulated route.
+                </p>
+              </li>
+              <li>
+                <h3>Know how current the data is</h3>
+                <p>
+                  Positions are classified as current, stale or lost. If the data stops refreshing,
+                  the view says it is no longer live instead of showing old data as current.
+                </p>
+              </li>
+              <li>
+                <h3>Open the vessel's detail page</h3>
+                <p>
+                  Go from the map straight to the vessel page for its security status, events and
+                  incidents.
+                </p>
+              </li>
+            </ol>
+          </div>
+        </div>
+      </section>
+
+      <section id="capabilities" aria-labelledby="capabilities-title">
+        <div class="container">
+          <div class="section-head">
+            <p class="eyebrow">Capabilities</p>
+            <h2 id="capabilities-title">What exists today, and what is planned.</h2>
+            <p class="lead">
+              We separate the two clearly. Everything in the prototype runs on simulated or demo
+              data.
+            </p>
+          </div>
+          <div class="status-columns">
+            <div class="status-panel">
+              <h3>
+                In the prototype <span class="tag tag-available">Available · simulated data</span>
+              </h3>
+              <p>Working features you can see in a demonstration.</p>
+              <ul class="checklist">
+                <li>
+                  <strong>Fleet awareness</strong>
+                  <span
+                    >Tactical map of simulated vessel positions, with current, stale and lost
+                    classification and filters.</span
+                  >
+                </li>
+                <li>
+                  <strong>Vessel-centric context</strong>
+                  <span
+                    >Selected-vessel panel with position, report age and simulated route, and vessel
+                    detail pages.</span
+                  >
+                </li>
+                <li>
+                  <strong>Security status</strong>
+                  <span
+                    >A rule-based 0–100 security score per vessel, lowered by unresolved simulated
+                    events and open incidents.</span
+                  >
+                </li>
+                <li>
+                  <strong>Incident workflow</strong>
+                  <span
+                    >Incidents move through open, investigating, contained and closed, with notes.
+                    Four fixed rules open an incident when related simulated events occur together
+                    on one vessel.</span
+                  >
+                </li>
+                <li>
+                  <strong>Safety rounds</strong>
+                  <span>Onboard safety rounds with checkpoints and findings, using demo data.</span>
+                </li>
+              </ul>
+            </div>
+            <div class="status-panel">
+              <h3>On the roadmap <span class="tag tag-planned">Planned</span></h3>
+              <p>
+                Not connected today. Some appear in the prototype as illustrative screens with demo
+                data.
+              </p>
+              <ul class="checklist">
+                <li>
+                  <strong>Real position data</strong>
+                  <span>Integration with real position sources such as AIS.</span>
+                </li>
+                <li>
+                  <strong>CCTV</strong>
+                  <span>Connecting onboard camera systems.</span>
+                </li>
+                <li>
+                  <strong>Onboard sensors and access control</strong>
+                  <span>Bringing sensor readings and access events into the vessel view.</span>
+                </li>
+                <li>
+                  <strong>Cyber security events</strong>
+                  <span>Connecting findings from onboard network and cyber security tools.</span>
+                </li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="early-access" id="early-access" aria-labelledby="early-access-title">
+        <div class="container split">
+          <div class="section-head">
+            <p class="eyebrow">Early access</p>
+            <h2 id="early-access-title">
+              Help shape the next generation of maritime security operations.
+            </h2>
+            <p class="lead">
+              We are speaking with maritime professionals to understand their operational challenges
+              and invite suitable organisations to explore and test the SeaShield prototype.
+            </p>
+          </div>
+
+          <div class="form-panel">
+            <form id="lead-form" action="#early-access" method="post" novalidate>
+              <p class="form-notice" role="note">
+                <strong>Not yet accepting requests.</strong> This form isn't connected yet and sends
+                and stores nothing.
+              </p>
+              <!-- Disabled until main.js has initialised: without JavaScript nothing can be entered or submitted. -->
+              <fieldset class="form-fieldset" id="lead-fields" disabled>
+                <div class="form-grid">
+                  <div class="field">
+                    <label for="name">Name<span class="required" aria-hidden="true">*</span></label>
+                    <input
+                      id="name"
+                      name="name"
+                      type="text"
+                      autocomplete="name"
+                      maxlength="100"
+                      required
+                      aria-describedby="name-error"
+                    />
+                    <p class="error" id="name-error"></p>
+                  </div>
+                  <div class="field">
+                    <label for="email"
+                      >Work email<span class="required" aria-hidden="true">*</span></label
+                    >
+                    <input
+                      id="email"
+                      name="email"
+                      type="email"
+                      autocomplete="email"
+                      maxlength="254"
+                      required
+                      aria-describedby="email-error"
+                    />
+                    <p class="error" id="email-error"></p>
+                  </div>
+                  <div class="field">
+                    <label for="company"
+                      >Company<span class="required" aria-hidden="true">*</span></label
+                    >
+                    <input
+                      id="company"
+                      name="company"
+                      type="text"
+                      autocomplete="organization"
+                      maxlength="120"
+                      required
+                      aria-describedby="company-error"
+                    />
+                    <p class="error" id="company-error"></p>
+                  </div>
+                  <div class="field">
+                    <label for="role">Role<span class="required" aria-hidden="true">*</span></label>
+                    <input
+                      id="role"
+                      name="role"
+                      type="text"
+                      autocomplete="organization-title"
+                      maxlength="100"
+                      required
+                      aria-describedby="role-error"
+                    />
+                    <p class="error" id="role-error"></p>
+                  </div>
+                  <div class="field field-wide">
+                    <label for="message"
+                      >What would you most like to improve in your current maritime monitoring or
+                      security workflow?</label
+                    >
+                    <p class="hint" id="message-hint">Optional.</p>
+                    <textarea
+                      id="message"
+                      name="message"
+                      maxlength="1000"
+                      aria-describedby="message-hint message-error"
+                    ></textarea>
+                    <p class="error" id="message-error"></p>
+                  </div>
+                  <div class="field field-wide consent">
+                    <input
+                      id="consent"
+                      name="consent"
+                      type="checkbox"
+                      value="yes"
+                      required
+                      aria-describedby="consent-error"
+                    />
+                    <label for="consent"
+                      >I have read the <a href="privacy.html">privacy notice</a> and agree to be
+                      contacted about early access.<span class="required" aria-hidden="true"
+                        >*</span
+                      ></label
+                    >
+                    <p class="error" id="consent-error"></p>
+                  </div>
+                  <div class="honeypot" aria-hidden="true">
+                    <label for="website">Leave this field empty</label>
+                    <input
+                      id="website"
+                      name="website"
+                      type="text"
+                      tabindex="-1"
+                      autocomplete="off"
+                    />
+                  </div>
+                </div>
+                <div class="form-actions">
+                  <button class="button button-primary" type="submit">Discuss early access</button>
+                  <p class="hint"><span aria-hidden="true">*</span> Required</p>
+                </div>
+              </fieldset>
+              <p class="form-status" id="lead-status" role="status" aria-live="polite"></p>
+            </form>
+          </div>
+        </div>
+      </section>
+
+      <section id="faq" aria-labelledby="faq-title">
+        <div class="container">
+          <div class="section-head">
+            <p class="eyebrow">FAQ</p>
+            <h2 id="faq-title">Questions</h2>
+          </div>
+          <div class="faq">
+            <details>
+              <summary>What is SeaShield?</summary>
+              <div>
+                <p>
+                  SeaShield is an early-stage maritime awareness and security operations product. It
+                  is currently a working prototype that brings vessel position context, security
+                  status and incidents into one vessel-centric view. It is not a live monitoring
+                  service.
+                </p>
+              </div>
+            </details>
+            <details>
+              <summary>Who is it designed for?</summary>
+              <div>
+                <p>
+                  Shipping companies, fleet and vessel operators, maritime security managers, and
+                  operations and risk teams who need a clearer view of vessel status and security
+                  context.
+                </p>
+              </div>
+            </details>
+            <details>
+              <summary>What can the current prototype demonstrate?</summary>
+              <div>
+                <p>
+                  The tactical map with simulated positions and freshness classification, the
+                  selected-vessel context panel, vessel detail pages, rule-based security scoring,
+                  and the incident and safety-round workflows, all on simulated or demo data. See
+                  <a href="#capabilities">Capabilities</a> for what is available and what is
+                  planned.
+                </p>
+              </div>
+            </details>
+            <details>
+              <summary>Does the current map use live AIS data?</summary>
+              <div>
+                <p>
+                  No. Vessel positions in the prototype are simulated, and the vessels are fictional
+                  demo data. The map shows a clear "simulated positions" notice and labels each
+                  position's source as simulated. Integration with real position sources such as AIS
+                  is planned but not yet built.
+                </p>
+              </div>
+            </details>
+            <details>
+              <summary>How can an organisation participate in testing?</summary>
+              <div>
+                <p>
+                  We are inviting maritime organisations to see a demonstration, share their
+                  workflows, and explore testing the prototype. Early-access requests are not open
+                  yet; the
+                  <a href="#early-access">early-access form</a> will accept them once it is
+                  connected.
+                </p>
+              </div>
+            </details>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="container footer-grid">
+        <div>
+          <p>SeaShield (working product name) · Maritime intelligence and operational security</p>
+          <p>
+            Contact:
+            <span class="placeholder" data-placeholder="contact-email"
+              >[contact email to be supplied before launch]</span
+            >
+          </p>
+        </div>
+        <ul>
+          <li><a href="privacy.html">Privacy notice (draft)</a></li>
+          <li><a href="#top">Back to top</a></li>
+        </ul>
+      </div>
+    </footer>
+  </body>
+</html>
