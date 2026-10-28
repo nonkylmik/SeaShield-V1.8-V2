@@ -1,5 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useSeaShield } from "@/lib/seashield/useSeaShield";
+import { typeFlagText } from "@/lib/seashield/typeFlag";
 import { commsAge, onlineText, stateColor } from "@/lib/seashield/format";
 import {
   PageHeader,
@@ -85,7 +86,7 @@ function FleetView() {
                     </td>
                     <td className="tabular px-3 py-2 text-muted-foreground">{v.imo}</td>
                     <td className="px-3 py-2 text-muted-foreground">
-                      {v.type} · {v.flag}
+                      {typeFlagText(v, dataSource)}
                     </td>
                     <td className="px-3 py-2">
                       <span className="flex items-center gap-2">

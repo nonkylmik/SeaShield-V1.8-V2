@@ -105,7 +105,9 @@ export function hydrateFromBackend(payload: BackendPayload) {
         securityScore: vessel.score,
         securityState: vessel.state,
         lastComms: vessel.lastComms,
-        // The fixture's voyage text belongs to a different, sort-order-assigned vessel: never keep it.
+        // The fixture's type, flag and voyage text belong to a different, sort-order-assigned vessel: never keep them.
+        type: "",
+        flag: "",
         route: "",
         simulatedRoute: vessel.simulatedRoute,
       };

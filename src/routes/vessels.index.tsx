@@ -1,5 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useSeaShield } from "@/lib/seashield/useSeaShield";
+import { typeFlagText } from "@/lib/seashield/typeFlag";
 import { voyageText } from "@/lib/seashield/voyage";
 import { commsAge, onlineText, stateColor } from "@/lib/seashield/format";
 import {
@@ -56,9 +57,7 @@ function VesselsIndex() {
                   </div>
                   <StatusDot state={v.securityState} />
                 </div>
-                <div className="label-mono normal-case">
-                  {v.type} · {v.flag}
-                </div>
+                <div className="label-mono normal-case">{typeFlagText(v, dataSource)}</div>
                 <div>
                   <div className="flex items-baseline justify-between">
                     <span className="label-mono">Security score</span>

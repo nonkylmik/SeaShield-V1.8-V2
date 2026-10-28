@@ -71,6 +71,7 @@ export interface Vessel {
   id: string;
   name: string;
   imo: string;
+  /** Seed-fixture vessel type and flag; empty for backend vessels and never shown for them (see typeFlagText). */
   type: string;
   flag: string;
   /** Seed-fixture voyage text; shown only for seed data, never for backend vessels (see voyageText). */
