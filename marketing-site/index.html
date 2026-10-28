@@ -345,106 +345,115 @@
           <div class="form-panel">
             <form id="lead-form" action="#early-access" method="post" novalidate>
               <p class="form-notice" role="note">
-                <strong>Not yet accepting requests.</strong> This form isn't connected yet.
-                Submitting it checks your entries but sends and stores nothing.
+                <strong>Not yet accepting requests.</strong> This form isn't connected yet and sends
+                and stores nothing.
               </p>
-              <div class="form-grid">
-                <div class="field">
-                  <label for="name">Name<span class="required" aria-hidden="true">*</span></label>
-                  <input
-                    id="name"
-                    name="name"
-                    type="text"
-                    autocomplete="name"
-                    maxlength="100"
-                    required
-                    aria-describedby="name-error"
-                  />
-                  <p class="error" id="name-error"></p>
+              <!-- Disabled until main.js has initialised: without JavaScript nothing can be entered or submitted. -->
+              <fieldset class="form-fieldset" id="lead-fields" disabled>
+                <div class="form-grid">
+                  <div class="field">
+                    <label for="name">Name<span class="required" aria-hidden="true">*</span></label>
+                    <input
+                      id="name"
+                      name="name"
+                      type="text"
+                      autocomplete="name"
+                      maxlength="100"
+                      required
+                      aria-describedby="name-error"
+                    />
+                    <p class="error" id="name-error"></p>
+                  </div>
+                  <div class="field">
+                    <label for="email"
+                      >Work email<span class="required" aria-hidden="true">*</span></label
+                    >
+                    <input
+                      id="email"
+                      name="email"
+                      type="email"
+                      autocomplete="email"
+                      maxlength="254"
+                      required
+                      aria-describedby="email-error"
+                    />
+                    <p class="error" id="email-error"></p>
+                  </div>
+                  <div class="field">
+                    <label for="company"
+                      >Company<span class="required" aria-hidden="true">*</span></label
+                    >
+                    <input
+                      id="company"
+                      name="company"
+                      type="text"
+                      autocomplete="organization"
+                      maxlength="120"
+                      required
+                      aria-describedby="company-error"
+                    />
+                    <p class="error" id="company-error"></p>
+                  </div>
+                  <div class="field">
+                    <label for="role">Role<span class="required" aria-hidden="true">*</span></label>
+                    <input
+                      id="role"
+                      name="role"
+                      type="text"
+                      autocomplete="organization-title"
+                      maxlength="100"
+                      required
+                      aria-describedby="role-error"
+                    />
+                    <p class="error" id="role-error"></p>
+                  </div>
+                  <div class="field field-wide">
+                    <label for="message"
+                      >What would you most like to improve in your current maritime monitoring or
+                      security workflow?</label
+                    >
+                    <p class="hint" id="message-hint">Optional.</p>
+                    <textarea
+                      id="message"
+                      name="message"
+                      maxlength="1000"
+                      aria-describedby="message-hint message-error"
+                    ></textarea>
+                    <p class="error" id="message-error"></p>
+                  </div>
+                  <div class="field field-wide consent">
+                    <input
+                      id="consent"
+                      name="consent"
+                      type="checkbox"
+                      value="yes"
+                      required
+                      aria-describedby="consent-error"
+                    />
+                    <label for="consent"
+                      >I have read the <a href="privacy.html">privacy notice</a> and agree to be
+                      contacted about early access.<span class="required" aria-hidden="true"
+                        >*</span
+                      ></label
+                    >
+                    <p class="error" id="consent-error"></p>
+                  </div>
+                  <div class="honeypot" aria-hidden="true">
+                    <label for="website">Leave this field empty</label>
+                    <input
+                      id="website"
+                      name="website"
+                      type="text"
+                      tabindex="-1"
+                      autocomplete="off"
+                    />
+                  </div>
                 </div>
-                <div class="field">
-                  <label for="email"
-                    >Work email<span class="required" aria-hidden="true">*</span></label
-                  >
-                  <input
-                    id="email"
-                    name="email"
-                    type="email"
-                    autocomplete="email"
-                    maxlength="254"
-                    required
-                    aria-describedby="email-error"
-                  />
-                  <p class="error" id="email-error"></p>
+                <div class="form-actions">
+                  <button class="button button-primary" type="submit">Discuss early access</button>
+                  <p class="hint"><span aria-hidden="true">*</span> Required</p>
                 </div>
-                <div class="field">
-                  <label for="company"
-                    >Company<span class="required" aria-hidden="true">*</span></label
-                  >
-                  <input
-                    id="company"
-                    name="company"
-                    type="text"
-                    autocomplete="organization"
-                    maxlength="120"
-                    required
-                    aria-describedby="company-error"
-                  />
-                  <p class="error" id="company-error"></p>
-                </div>
-                <div class="field">
-                  <label for="role">Role<span class="required" aria-hidden="true">*</span></label>
-                  <input
-                    id="role"
-                    name="role"
-                    type="text"
-                    autocomplete="organization-title"
-                    maxlength="100"
-                    required
-                    aria-describedby="role-error"
-                  />
-                  <p class="error" id="role-error"></p>
-                </div>
-                <div class="field field-wide">
-                  <label for="message"
-                    >What would you most like to improve in your current maritime monitoring or
-                    security workflow?</label
-                  >
-                  <p class="hint" id="message-hint">Optional.</p>
-                  <textarea
-                    id="message"
-                    name="message"
-                    maxlength="1000"
-                    aria-describedby="message-hint message-error"
-                  ></textarea>
-                  <p class="error" id="message-error"></p>
-                </div>
-                <div class="field field-wide consent">
-                  <input
-                    id="consent"
-                    name="consent"
-                    type="checkbox"
-                    value="yes"
-                    required
-                    aria-describedby="consent-error"
-                  />
-                  <label for="consent"
-                    >I have read the <a href="privacy.html">privacy notice</a> and agree to be
-                    contacted about early access.<span class="required" aria-hidden="true"
-                      >*</span
-                    ></label
-                  >
-                  <p class="error" id="consent-error"></p>
-                </div>
-                <div class="honeypot" aria-hidden="true">
-                  <label for="website">Leave this field empty</label>
-                  <input id="website" name="website" type="text" tabindex="-1" autocomplete="off" />
-                </div>
-              </div>
-              <div class="form-actions">
-                <button class="button button-primary" type="submit">Discuss early access</button>
-                <p class="hint"><span aria-hidden="true">*</span> Required</p>
-              </div>
+              </fieldset>
               <p class="form-status" id="lead-status" role="status" aria-live="polite"></p>
             </form>
           </div>

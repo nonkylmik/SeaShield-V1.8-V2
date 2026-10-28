@@ -1,11 +1,14 @@
 // Page integrity: links, assets, accessibility basics, simulated-data disclosures, claims and contrast.
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
+import { resolve, sep } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { LIMITS } from "../form.js";
 import { resolveRequest } from "../scripts/serve.mjs";
 
+const SITE_ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const site = (path) => fileURLToPath(new URL(`../${path}`, import.meta.url));
 const read = (path) => readFileSync(site(path), "utf8");
 const PAGES = ["index.html", "privacy.html"];
@@ -26,7 +29,7 @@ test("every in-page link points to an existing id", () => {
   }
 });
 
-test("every local file the pages and stylesheet reference exists", () => {
+test("every local file the pages and stylesheet reference exists inside the site", () => {
   const refs = [];
   for (const page of PAGES) {
     const html = read(page);
@@ -37,7 +40,11 @@ test("every local file the pages and stylesheet reference exists", () => {
   for (const [, ref] of read("styles.css").matchAll(/url\("\.\/([^"]+)"\)/g))
     refs.push(["styles.css", ref]);
   assert.ok(refs.length > 10);
-  for (const [from, ref] of refs) assert.ok(existsSync(site(ref)), `${from}: missing ${ref}`);
+  for (const [from, ref] of refs) {
+    const file = resolve(SITE_ROOT, ref);
+    assert.ok(file.startsWith(SITE_ROOT + sep), `${from}: ${ref} points outside the site`);
+    assert.ok(existsSync(file), `${from}: missing ${ref}`);
+  }
 });
 
 test("no page or stylesheet loads anything from another origin", () => {
@@ -46,6 +53,24 @@ test("no page or stylesheet loads anything from another origin", () => {
     assert.doesNotMatch(text, /(?:src|href|srcset|url\()\s*=?\s*["(]?\s*(?:https?:)?\/\//, file);
   }
   assert.match(index, /http-equiv="Content-Security-Policy"[^>]+default-src 'self'/);
+});
+
+test("the site's JavaScript makes no requests except to the configured form endpoint", () => {
+  for (const file of ["main.js", "form.js", "config.js"]) {
+    const code = read(file);
+    assert.doesNotMatch(code, /\bhttps?:\/\//, `${file}: absolute URL`);
+    assert.doesNotMatch(code, /["'`]\/\/[a-z0-9]/i, `${file}: protocol-relative URL`);
+    assert.doesNotMatch(
+      code,
+      /\b(XMLHttpRequest|sendBeacon|WebSocket|EventSource|importScripts|import\s*\()/,
+      `${file}: request API`,
+    );
+  }
+  assert.doesNotMatch(read("main.js") + read("config.js"), /\bfetch\b/);
+  // form.js's only request goes to the endpoint passed in, which main.js takes from config.js.
+  const calls = [...read("form.js").matchAll(/\bfetch(?:Impl)?\s*\(([^,)]*)/g)].map((m) => m[1]);
+  assert.deepEqual(calls, ["endpoint"]);
+  assert.match(read("main.js"), /submitLead\(values, \{ endpoint: FORM_ENDPOINT \}\)/);
 });
 
 /** Width and height of a WebP file (lossy, lossless or extended). */
@@ -96,6 +121,39 @@ test("form controls have labels and error slots", () => {
   }
   assert.match(index, /<form id="lead-form"/);
   assert.match(index, /role="status"/);
+});
+
+test("the form ships disabled, so without JavaScript nothing can be entered or submitted", () => {
+  const form = index.match(/<form id="lead-form"[\s\S]*?<\/form>/)[0];
+  const fieldset = form.match(/<fieldset\b[^>]*>[\s\S]*?<\/fieldset>/)?.[0];
+  assert.ok(fieldset, "the form has a fieldset");
+  assert.match(fieldset.match(/<fieldset\b[^>]*>/)[0], /\sid="lead-fields"[^>]*\sdisabled[\s>]/);
+  // Every control, including the submit button and the honeypot, is inside the disabled fieldset.
+  const controls = (html) => [...html.matchAll(/<(input|textarea|select|button)\b[^>]*>/g)].length;
+  assert.equal(controls(form), 8);
+  assert.equal(controls(fieldset), controls(form));
+  assert.equal([...index.matchAll(/<fieldset\b/g)].length, 1);
+});
+
+test("main.js enables the form only after its submit handler is attached", () => {
+  const main = read("main.js");
+  const handler = main.indexOf('form.addEventListener("submit"');
+  const enable = main.indexOf("controls.disabled = false");
+  assert.ok(handler > 0 && enable > handler, "enabled after the handler is attached");
+  assert.equal(
+    main.match(/\.disabled = false/g).length,
+    2,
+    "only the fieldset and the button reset",
+  );
+  assert.match(main, /document\.getElementById\("lead-fields"\)/);
+});
+
+test("validation limits match the inputs' maxlength", () => {
+  for (const [field, max] of Object.entries(LIMITS)) {
+    const tag = index.match(new RegExp(`<(?:input|textarea)\\b[^>]*\\sid="${field}"[^>]*>`))?.[0];
+    assert.ok(tag, `#${field} exists`);
+    assert.equal(tag.match(/\smaxlength="(\d+)"/)?.[1], String(max), `#${field} maxlength`);
+  }
 });
 
 test("the copy makes no unsupported claims", () => {

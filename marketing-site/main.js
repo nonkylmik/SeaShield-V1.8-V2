@@ -74,4 +74,8 @@ if (form instanceof HTMLFormElement) {
     submit.disabled = false;
     if (outcome === "sent") form.reset();
   });
+
+  // Fail closed: the controls ship disabled and are enabled only once the handler above is in place.
+  const controls = document.getElementById("lead-fields");
+  if (controls instanceof HTMLFieldSetElement) controls.disabled = false;
 }

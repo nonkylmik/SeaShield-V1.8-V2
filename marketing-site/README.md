@@ -43,6 +43,11 @@ The root type-check, build and app tests do not include this directory.
 `config.js` sets `FORM_ENDPOINT = null`. In that state the form checks entries in the browser, then
 tells the visitor that nothing was sent or stored. It never sends, stores or reports success.
 
+The form's controls, including the submit button, ship inside a disabled `<fieldset>`. `main.js`
+enables it only after the submit handler is attached. Without JavaScript (disabled, blocked, or failing
+to load) the form cannot be filled in or submitted, so the browser's native form submission can never
+send anything.
+
 To connect it later, after a destination has been approved:
 
 1. Set `FORM_ENDPOINT` in `config.js`.

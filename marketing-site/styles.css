@@ -565,6 +565,20 @@ form[data-state="unconfigured"] .form-notice,
 .no-js .form-notice {
   display: block;
 }
+.form-fieldset {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+.form-fieldset:disabled {
+  opacity: 0.55;
+}
+.form-fieldset:disabled input,
+.form-fieldset:disabled textarea,
+.form-fieldset:disabled button {
+  cursor: not-allowed;
+}
 .form-grid {
   display: grid;
   gap: 1.1rem;
