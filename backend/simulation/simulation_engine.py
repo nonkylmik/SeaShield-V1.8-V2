@@ -35,6 +35,11 @@ class SimulationEngine:
     def set_broadcaster(self, broadcaster: Callable[[dict[str, Any]], Any] | None) -> None:
         self._broadcast = broadcaster
 
+    @property
+    def notifications_deferred(self) -> bool:
+        """True inside a deferred_notifications block."""
+        return self._deferred is not None
+
     @contextmanager
     def deferred_notifications(self, *, publish: bool = True) -> Iterator[None]:
         """Hold notifications until the block completes; send them only if it succeeds and `publish` is true."""
