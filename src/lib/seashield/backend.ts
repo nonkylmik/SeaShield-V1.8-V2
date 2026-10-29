@@ -1,5 +1,6 @@
 import { parseApiTimestamp } from "./freshness";
 import { uiAllowedStatuses } from "./incidentTransitions";
+import { LOADED_EVENT_LIMIT } from "./mapOverview";
 import { parsePositionsResponse, type PositionsSnapshot } from "./positions";
 import { securityStateFromApi } from "./securityStatus";
 import { simulationLogOutcome, type ApiSimulationLogEntry } from "./simulationLog";
@@ -161,7 +162,7 @@ export async function refreshSeaShieldBackend() {
     request<ApiVessel[]>("/api/v1/vessels"),
     request<ApiFleetSummary>("/api/v1/fleet/security-summary"),
     request<ApiCamera[]>("/api/v1/cameras"),
-    request<ApiEvent[]>("/api/security-events?limit=100"),
+    request<ApiEvent[]>(`/api/security-events?limit=${LOADED_EVENT_LIMIT}`),
     request<ApiIncident[]>("/api/v1/incidents"),
     request<SafetyRound[]>("/api/v1/safety-rounds?limit=100"),
     request<SafetyFinding[]>("/api/v1/safety-findings?limit=100"),
@@ -263,6 +264,9 @@ export async function refreshSeaShieldBackend() {
       fleet.average_score === null
         ? null
         : { score: fleet.average_score, state: securityStateFromApi(fleet.average_status) },
+    fleetVesselCount:
+      Number.isInteger(fleet.vessel_count) && fleet.vessel_count >= 0 ? fleet.vessel_count : null,
+    refreshedAt: Date.now(),
   });
 }
 

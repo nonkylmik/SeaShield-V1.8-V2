@@ -14,6 +14,7 @@ import {
   centerOn,
   clampView,
   fitPoints,
+  incidentBadge,
   markerStyle,
   WORLD_VIEW,
   zoomAt,
@@ -238,13 +239,16 @@ export function FleetMap({
           const x = point[0] * view.k + view.x;
           const y = point[1] * view.k + view.y;
           const selected = row.id === selectedId;
+          const badge = incidentBadge(row);
           return (
             <g
               key={row.id}
               transform={`translate(${x} ${y})`}
               role="button"
               tabIndex={0}
-              aria-label={`${row.name}: ${row.securityState} security status, position ${position.freshness}`}
+              aria-label={`${row.name}: ${row.securityState} security status, position ${position.freshness}${
+                badge ? `, ${badge.count} open incidents, worst ${badge.severity}` : ""
+              }`}
               aria-pressed={selected}
               className="cursor-pointer outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring focus-visible:outline-solid"
               onPointerDown={(event) => event.stopPropagation()}
@@ -278,11 +282,11 @@ export function FleetMap({
                   strokeLinejoin="round"
                 />
               )}
-              {row.openIncidents > 0 && row.incidentSeverity ? (
+              {badge ? (
                 <g transform="translate(9 -9)">
                   <circle
                     r="6"
-                    fill={SEVERITY_FILL[row.incidentSeverity]}
+                    fill={SEVERITY_FILL[badge.severity]}
                     stroke="var(--background)"
                     strokeWidth="1"
                   />
@@ -293,7 +297,7 @@ export function FleetMap({
                     fontWeight="700"
                     fill="var(--background)"
                   >
-                    {row.openIncidents}
+                    {badge.count}
                   </text>
                 </g>
               ) : null}
@@ -350,7 +354,55 @@ export function FleetMap({
         chart
         {landFailed ? " · coastline unavailable" : ""}
       </div>
+      <MapLegend />
     </div>
+  );
+}
+
+const LEGEND_STATES: SecurityState[] = ["critical", "warning", "elevated", "secure", "unknown"];
+const LEGEND_SEVERITIES: Severity[] = ["critical", "high", "medium", "low"];
+
+/**
+ * What the marker colours, badges and outlines mean. Collapsed by default; when open it stays in the top-left corner,
+ * clear of the zoom controls (right), the caption (bottom) and the map centre, where a selected vessel is centred.
+ */
+function MapLegend() {
+  return (
+    <details className="label-mono absolute top-2 left-2 max-h-[45%] max-w-[min(16rem,calc(100%-3.5rem))] overflow-y-auto rounded-sm border border-border bg-panel/95 px-2 py-1 normal-case">
+      <summary className="cursor-pointer select-none">Legend</summary>
+      <dl className="mt-1 space-y-1.5 pb-0.5">
+        <div>
+          <dt>Marker colour · backend security status</dt>
+          <dd className="mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5">
+            {LEGEND_STATES.map((state) => (
+              <span key={state} className="flex items-center gap-1 uppercase">
+                <svg viewBox="-6 -6 12 12" className="size-2.5" aria-hidden="true">
+                  <circle r="5" fill={SECURITY_FILL[state]} />
+                </svg>
+                {state}
+              </span>
+            ))}
+          </dd>
+        </div>
+        <div>
+          <dt>Badge · open incidents, coloured by the worst open severity</dt>
+          <dd className="mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5">
+            {LEGEND_SEVERITIES.map((severity) => (
+              <span key={severity} className="flex items-center gap-1 uppercase">
+                <svg viewBox="-6 -6 12 12" className="size-2.5" aria-hidden="true">
+                  <circle r="5" fill={SEVERITY_FILL[severity]} />
+                </svg>
+                {severity}
+              </span>
+            ))}
+          </dd>
+        </div>
+        <div>
+          <dt>Outline · position contact</dt>
+          <dd className="mt-0.5">solid current · dashed stale · hollow lost</dd>
+        </div>
+      </dl>
+    </details>
   );
 }
 

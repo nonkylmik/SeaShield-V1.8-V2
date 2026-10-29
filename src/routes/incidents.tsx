@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { Plus } from "lucide-react";
+import { selectIncident } from "@/lib/seashield/incidentSelection";
 import { statusOptions } from "@/lib/seashield/incidentTransitions";
 import { incidentService } from "@/lib/seashield/services";
 import { useSeaShield } from "@/lib/seashield/useSeaShield";
@@ -26,6 +27,11 @@ export const Route = createFileRoute("/incidents")({
       },
     ],
   }),
+  // Optional: the incident to open first (links from the tactical map's vessel panel).
+  validateSearch: (search: Record<string, unknown>): { incident?: string } => {
+    const incident = search["incident"];
+    return typeof incident === "string" && incident ? { incident } : {};
+  },
   component: IncidentsView,
 });
 
@@ -40,11 +46,17 @@ function IncidentsView() {
   const operator = useSeaShield((s) => s.operator);
 
   const rows = useMemo(() => incidentService.list(scope), [scope, incidents]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const { incident: linkedId } = Route.useSearch();
+  const [selectedId, setSelectedId] = useState<string | null>(linkedId ?? null);
   const [creating, setCreating] = useState(false);
   const [note, setNote] = useState("");
 
-  const selected: Incident | undefined = rows.find((i) => i.id === selectedId) ?? rows[0];
+  const loading = useSeaShield(
+    (s) => s.lastRefreshAt === null && s.connection.backend === "online",
+  );
+  const selection = selectIncident({ rows, selectedId, linkedId, loading });
+  const selected: Incident | undefined =
+    selection.kind === "selected" ? selection.incident : undefined;
   const name = (id: string) => vessels.find((v) => v.id === id)?.name ?? id;
 
   return (
@@ -248,7 +260,15 @@ function IncidentsView() {
           </Panel>
         ) : (
           <Panel title="Investigation">
-            <p className="p-3 text-xs text-muted-foreground">No incident selected.</p>
+            {selection.kind === "not-found" ? (
+              <p role="status" className="p-3 text-xs text-warning">
+                {selection.loading
+                  ? `Looking for incident ${selection.incidentId}…`
+                  : `Incident ${selection.incidentId} is not in this list.`}
+              </p>
+            ) : (
+              <p className="p-3 text-xs text-muted-foreground">No incident selected.</p>
+            )}
           </Panel>
         )}
       </div>

@@ -386,6 +386,8 @@ export function buildSeedState(): SeaShieldState {
     connection: { edge: "online", backend: "online", mode: "SIMULATION V1" },
     dataSource: "seed",
     fleetAverage: null,
+    fleetVesselCount: null,
+    lastRefreshAt: null,
   };
 }
 
