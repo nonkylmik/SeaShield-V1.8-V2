@@ -102,32 +102,38 @@ test("controls are offered only where the state allows them", () => {
     canStart: true,
     canNext: false,
     canStop: false,
+    canReset: true,
   });
   assert.deepEqual(offered({ scenario: "cyber-intrusion", state: "running", index: 1 }), {
     canStart: true,
     canNext: true,
     canStop: true,
+    canReset: true,
   });
   assert.deepEqual(offered({ scenario: "cyber-intrusion", state: "paused", index: 1 }), {
     canStart: true,
     canNext: false,
     canStop: true,
+    canReset: true,
   });
   for (const state of ["stopped", "complete"])
     assert.deepEqual(offered({ scenario: "cyber-intrusion", state, index: 5 }), {
       canStart: true,
       canNext: false,
       canStop: false,
+      canReset: true,
     });
-  // Unknown status or an unreachable backend: nothing is offered.
-  assert.deepEqual(scenarioControls(view(null), "online", scenarios), {
-    canStart: false,
-    canNext: false,
-    canStop: false,
-  });
+  const nothing = { canStart: false, canNext: false, canStop: false, canReset: false };
+  // Loading (no backend data yet, while the seed state reports the backend online), unknown status, or an
+  // unreachable backend: nothing is offered, reset included.
+  assert.deepEqual(
+    scenarioControls(view(null, { lastRefreshAt: null }), "online", scenarios),
+    nothing,
+  );
+  assert.deepEqual(scenarioControls(view(null), "online", scenarios), nothing);
   assert.deepEqual(
     offered({ scenario: "cyber-intrusion", state: "running", index: 1 }, "degraded"),
-    { canStart: false, canNext: false, canStop: false },
+    nothing,
   );
   assert.equal(
     scenarioControls(view({ scenario: null, state: "idle", index: 0 }), "online", null).canStart,

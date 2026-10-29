@@ -115,7 +115,10 @@ export function scenarioPanelView(input: {
   };
 }
 
-/** Which controls are offered. Nothing is offered while the status is unknown or the backend is unreachable. */
+/**
+ * Which controls are offered. Nothing, reset included, is offered while the status is loading or unknown or the
+ * backend is unreachable.
+ */
 export function scenarioControls(
   view: ScenarioPanelView,
   backend: OnlineState,
@@ -127,6 +130,7 @@ export function scenarioControls(
     canStart: known && scenarios !== null && scenarios.length > 0,
     canNext: known && state === "running",
     canStop: known && (state === "running" || state === "paused"),
+    canReset: known,
   };
 }
 

@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { FastForward, Play, RotateCcw, Square } from "lucide-react";
 import {
   AlertDialog,
@@ -17,7 +17,6 @@ import {
   scenarioPanelView,
   startPlan,
   type ScenarioPanelView,
-  type StartPlan,
 } from "@/lib/seashield/simulationControls";
 import { useSeaShield } from "@/lib/seashield/useSeaShield";
 import { utcTime } from "@/lib/seashield/format";
@@ -42,20 +41,31 @@ export function SimulationConsole({ className }: { className?: string }) {
   const [scenarioKey, setScenarioKey] = useState("");
   const [pending, setPending] = useState<Control | null>(null);
   const [outcome, setOutcome] = useState<{ ok: boolean; message: string } | null>(null);
-  const [confirmStart, setConfirmStart] = useState<StartPlan | null>(null);
+  // Only the key is kept: what starting it would do (including what it replaces) is recomputed from the latest
+  // status on every render, so a scenario another operator starts while the dialog is open is shown.
+  const [startKey, setStartKey] = useState<string | null>(null);
+  const plan = startKey === null ? null : startPlan(startKey, scenarios, view);
   const [confirmReset, setConfirmReset] = useState(false);
   const [targetChoice, setTargetChoice] = useState<string | null>(null);
   const target = consoleInjectionTarget(targetChoice, selected);
 
+  // Set synchronously, unlike state: a repeat in the same tick (a double click) is refused here and cannot clear the
+  // in-progress state of the request that is still running.
+  const inFlight = useRef(false);
   /** One control request at a time; the outcome shown is the backend's, success or failure. */
   const run = async (control: Control, action: () => Promise<ActionResult>) => {
-    if (pending) return;
+    if (inFlight.current) return;
+    inFlight.current = true;
     setPending(control);
     setOutcome(null);
-    const result = await action();
-    setPending(null);
-    if (result.status === "busy") return;
-    setOutcome({ ok: result.status === "done", message: result.message });
+    try {
+      const result = await action();
+      if (result.status !== "busy")
+        setOutcome({ ok: result.status === "done", message: result.message });
+    } finally {
+      inFlight.current = false;
+      setPending(null);
+    }
   };
 
   return (
@@ -67,7 +77,7 @@ export function SimulationConsole({ className }: { className?: string }) {
         <button
           type="button"
           onClick={() => setConfirmReset(true)}
-          disabled={pending !== null || backend !== "online"}
+          disabled={!controls.canReset || pending !== null}
           className="label-mono flex items-center gap-1.5 border border-border px-2 py-1 hover:bg-accent disabled:cursor-not-allowed disabled:opacity-40"
         >
           <RotateCcw className="size-3" /> {pending === "reset" ? "Resetting…" : "Reset…"}
@@ -106,7 +116,7 @@ export function SimulationConsole({ className }: { className?: string }) {
               ))}
             </select>
             <ControlButton
-              onClick={() => setConfirmStart(startPlan(scenarioKey, scenarios, view))}
+              onClick={() => setStartKey(scenarioKey)}
               disabled={!controls.canStart || !scenarioKey || pending !== null}
               icon={<Play className="size-3" />}
               label={pending === "start" ? "Starting…" : "Start…"}
@@ -189,55 +199,61 @@ export function SimulationConsole({ className }: { className?: string }) {
       </div>
 
       <ConfirmDialog
-        open={confirmStart !== null}
-        onClose={() => setConfirmStart(null)}
-        title={
-          confirmStart?.replaces ? "Replace the active scenario?" : "Start a simulated scenario?"
-        }
+        open={startKey !== null}
+        onClose={() => setStartKey(null)}
+        title={plan?.replaces ? "Replace the active scenario?" : "Start a simulated scenario?"}
         description="Starts the scripted scenario in the SeaShield simulation and runs its first step now. No real vessel or onboard system is affected."
-        confirmLabel={confirmStart?.replaces ? "Replace and start" : "Start scenario"}
-        destructive={Boolean(confirmStart?.replaces)}
+        confirmLabel={plan?.replaces ? "Replace and start" : "Start scenario"}
+        destructive={Boolean(plan?.replaces)}
+        // The plan shown is the one confirmed; nothing is confirmed while it cannot be shown accurately.
+        confirmDisabled={!plan || !controls.canStart}
         onConfirm={() => {
-          const plan = confirmStart;
-          if (plan) void run("start", () => simulationService.startScenario(plan.scenario.key));
+          if (plan && controls.canStart)
+            void run("start", () => simulationService.startScenario(plan.scenario.key));
         }}
       >
-        {confirmStart ? (
+        {plan ? (
           <>
             <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
               <dt className="label-mono">Scenario</dt>
               <dd>
-                {confirmStart.scenario.label}
+                {plan.scenario.label}
                 <span className="ml-2 font-mono text-xs text-muted-foreground">
-                  {confirmStart.scenario.key}
+                  {plan.scenario.key}
                 </span>
               </dd>
               <dt className="label-mono">Target vessel</dt>
               <dd>
-                {confirmStart.scenario.vesselName ?? "Not in the current fleet"}
+                {plan.scenario.vesselName ?? "Not in the current fleet"}
                 <span className="ml-2 font-mono text-xs text-muted-foreground">
-                  {confirmStart.scenario.vesselId} · fixed by the scenario
+                  {plan.scenario.vesselId} · fixed by the scenario
                 </span>
               </dd>
               <dt className="label-mono">Steps</dt>
-              <dd>{confirmStart.scenario.stepCount} (step 1 runs now, then one per Next step)</dd>
+              <dd>{plan.scenario.stepCount} (step 1 runs now, then one per Next step)</dd>
             </dl>
-            {confirmStart.replaces ? (
+            {plan.replaces ? (
               <p
                 role="alert"
                 className="mt-3 rounded-sm border border-warning/50 bg-warning/10 px-2 py-1.5 text-sm text-warning"
               >
-                This replaces {confirmStart.replaces.label}, which is {confirmStart.replaces.state}{" "}
-                at step {confirmStart.replaces.step}
-                {confirmStart.replaces.stepCount === null
-                  ? ""
-                  : ` of ${confirmStart.replaces.stepCount}`}
-                . Its remaining steps will not run; events it already generated stay in the
-                simulation.
+                This replaces {plan.replaces.label}, which is {plan.replaces.state} at step{" "}
+                {plan.replaces.step}
+                {plan.replaces.stepCount === null ? "" : ` of ${plan.replaces.stepCount}`}. Its
+                remaining steps will not run; events it already generated stay in the simulation.
               </p>
             ) : null}
+            {controls.canStart ? null : (
+              <p role="status" className="mt-3 text-sm text-warning">
+                The simulation status is not known right now, so the scenario cannot be started.
+              </p>
+            )}
           </>
-        ) : null}
+        ) : (
+          <p role="status" className="text-sm text-warning">
+            This scenario is no longer in the backend&apos;s scenario list.
+          </p>
+        )}
       </ConfirmDialog>
 
       <ConfirmDialog
@@ -329,6 +345,7 @@ function ConfirmDialog({
   description,
   confirmLabel,
   destructive = false,
+  confirmDisabled = false,
   onConfirm,
   children,
 }: {
@@ -338,6 +355,7 @@ function ConfirmDialog({
   description: string;
   confirmLabel: string;
   destructive?: boolean;
+  confirmDisabled?: boolean;
   onConfirm: () => void;
   children: ReactNode;
 }) {
@@ -358,6 +376,7 @@ function ConfirmDialog({
           <AlertDialogCancel>Cancel</AlertDialogCancel>
           <AlertDialogAction
             onClick={onConfirm}
+            disabled={confirmDisabled}
             className={cn(
               destructive && "bg-destructive text-destructive-foreground hover:bg-destructive/90",
             )}
