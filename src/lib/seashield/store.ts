@@ -81,6 +81,8 @@ type BackendPayload = {
   fleetVesselCount?: SeaShieldState["fleetVesselCount"];
   /** Set only by a full refresh; a health-only update (degraded) keeps the time of the last data received. */
   refreshedAt?: number;
+  simulationStatus?: SeaShieldState["simulationStatus"];
+  simulationScenarios?: SeaShieldState["simulationScenarios"];
   simLog?: SimulationLogEntry[];
   simLogAvailable?: boolean;
 };
@@ -144,6 +146,9 @@ export function hydrateFromBackend(payload: BackendPayload) {
   if (payload.fleetAverage !== undefined) state.fleetAverage = payload.fleetAverage;
   if (payload.fleetVesselCount !== undefined) state.fleetVesselCount = payload.fleetVesselCount;
   if (payload.refreshedAt !== undefined) state.lastRefreshAt = payload.refreshedAt;
+  if (payload.simulationStatus !== undefined) state.simulationStatus = payload.simulationStatus;
+  if (payload.simulationScenarios !== undefined)
+    state.simulationScenarios = payload.simulationScenarios;
   if (payload.simLog) state.simLog = payload.simLog;
   if (payload.simLogAvailable !== undefined) state.simLogAvailable = payload.simLogAvailable;
   state.connection = {

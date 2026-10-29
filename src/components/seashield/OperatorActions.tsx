@@ -29,11 +29,10 @@ type PendingInjection = {
 };
 
 /**
- * Injects a simulated event for the selected vessel after explicit confirmation of the vessel and event type. Only
- * one injection is in flight at a time; there is no fallback vessel.
+ * Injects a simulated event for `vesselId` after explicit confirmation of the vessel and event type. Only one
+ * injection is in flight at a time; there is no fallback vessel ("all" means none chosen).
  */
-export function SimulatedInjection() {
-  const selectedVesselId = useSeaShield((s) => s.selectedVesselId);
+export function SimulatedInjection({ vesselId: selectedVesselId }: { vesselId: string | "all" }) {
   const vessels = useSeaShield((s) => s.vessels);
   const dataSource = useSeaShield((s) => s.dataSource);
   const backend = useSeaShield((s) => s.connection.backend);
