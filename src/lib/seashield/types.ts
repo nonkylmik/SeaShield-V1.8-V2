@@ -226,4 +226,8 @@ export interface SeaShieldState {
   dataSource: "seed" | "backend";
   /** Fleet average score and the backend's classification of that average; null without backend data. */
   fleetAverage: { score: number; state: SecurityState } | null;
+  /** Vessel count from the backend's fleet security summary; null without backend data. */
+  fleetVesselCount: number | null;
+  /** Wall-clock time (ms) the last full backend refresh was applied; null until one has been. */
+  lastRefreshAt: number | null;
 }

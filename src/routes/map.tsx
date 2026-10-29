@@ -9,7 +9,15 @@ import {
   SeverityTag,
   StatusDot,
 } from "@/components/seashield/primitives";
-import { elapsed, stateColor, utcStamp } from "@/lib/seashield/format";
+import { elapsed, severityText, stateColor, utcStamp } from "@/lib/seashield/format";
+import {
+  fleetSummaryView,
+  incidentEvidence,
+  isOpenIncident,
+  LOADED_EVENT_LIMIT,
+  SECURITY_STATE_ORDER,
+  SEVERITY_ORDER,
+} from "@/lib/seashield/mapOverview";
 import {
   buildMapRows,
   feedAfterFailure,
@@ -30,7 +38,7 @@ import {
 import type { PositionFreshness } from "@/lib/seashield/positions";
 import { positionStatusText, vesselContext } from "@/lib/seashield/vesselContext";
 import { positionService, vesselService } from "@/lib/seashield/services";
-import type { SecurityState, Severity } from "@/lib/seashield/types";
+import type { Incident, SecurityEvent, SecurityState, Severity } from "@/lib/seashield/types";
 import { useSeaShield } from "@/lib/seashield/useSeaShield";
 import { cn } from "@/lib/utils";
 
@@ -81,7 +89,7 @@ function MapView() {
     () =>
       buildMapRows(
         vessels.map((vessel) => {
-          const open = incidents.filter((i) => i.vesselId === vessel.id && i.status !== "closed");
+          const open = incidents.filter((i) => i.vesselId === vessel.id && isOpenIncident(i));
           return {
             id: vessel.id,
             name: vessel.name,
@@ -123,6 +131,7 @@ function MapView() {
         <RadioTower className="size-3.5" />
         Simulated positions — not real AIS or vessel data
       </div>
+      <FleetSummaryStrip />
       <FeedStatus feed={feed} backendOnline={backend === "online"} counts={counts} />
       <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-border px-4 py-2">
         <form
@@ -160,7 +169,8 @@ function MapView() {
           onChange={(freshness) => setFilters({ ...filters, freshness })}
         />
         <FilterGroup
-          label="Open incidents"
+          label="Worst open incident"
+          hint="Matches a vessel by the severity of its worst open incident only"
           options={SEVERITY_FILTERS}
           active={filters.incidentSeverities}
           onChange={(incidentSeverities) => setFilters({ ...filters, incidentSeverities })}
@@ -276,6 +286,98 @@ function FeedStatus({
   );
 }
 
+/**
+ * Fleet-level security from the backend's security summary and incidents, read in the same refresh as the map's
+ * vessels. Demo fixtures shown before any backend data are never summarised.
+ */
+function FleetSummaryStrip() {
+  const lastRefreshAt = useSeaShield((s) => s.lastRefreshAt);
+  const backend = useSeaShield((s) => s.connection.backend);
+  const vesselCount = useSeaShield((s) => s.fleetVesselCount);
+  const average = useSeaShield((s) => s.fleetAverage);
+  const vessels = useSeaShield((s) => s.vessels);
+  const incidents = useSeaShield((s) => s.incidents);
+  const view = fleetSummaryView({
+    lastRefreshAt,
+    backend,
+    vesselCount,
+    average,
+    vessels,
+    incidents,
+  });
+
+  let body: ReactNode;
+  if (view.kind === "loading")
+    body = <span className="text-muted-foreground">Loading fleet security summary…</span>;
+  else if (view.kind === "unavailable")
+    body = (
+      <span className="text-warning">
+        Fleet security summary unavailable · no backend data received; the vessels listed are demo
+        data
+      </span>
+    );
+  else {
+    const asOf = (
+      <span className={cn("ml-auto", view.live ? "text-muted-foreground" : "text-warning")}>
+        {view.live
+          ? `Security data as of ${utcStamp(view.asOf)}`
+          : `Backend unreachable · security data not live, as of ${utcStamp(view.asOf)}`}
+      </span>
+    );
+    if (view.kind === "empty")
+      body = (
+        <>
+          <span>No vessels in the fleet.</span>
+          {asOf}
+        </>
+      );
+    else {
+      const severities = SEVERITY_ORDER.filter((severity) => view.openBySeverity[severity] > 0);
+      body = (
+        <>
+          <span className="tabular">{view.vesselCount ?? "—"} vessels</span>
+          <span title="The backend's classification of the fleet average score, not of the worst vessel">
+            Fleet average{" "}
+            {view.average ? (
+              <span className={cn("font-semibold tabular", stateColor[view.average.state])}>
+                {view.average.score} · {view.average.state.toUpperCase()}
+              </span>
+            ) : (
+              "—"
+            )}
+          </span>
+          <span className="flex gap-2 tabular">
+            {SECURITY_STATE_ORDER.map((state) => (
+              <span key={state} className={cn(view.vesselsByState[state] > 0 && stateColor[state])}>
+                {view.vesselsByState[state]} {state}
+              </span>
+            ))}
+          </span>
+          <span className="tabular">
+            Open incidents {view.openIncidents}
+            {severities.length ? " · " : ""}
+            {severities.map((severity, index) => (
+              <span key={severity} className={severityText[severity]}>
+                {index ? ", " : ""}
+                {view.openBySeverity[severity]} {severity}
+              </span>
+            ))}
+          </span>
+          {asOf}
+        </>
+      );
+    }
+  }
+  return (
+    <section
+      aria-label="Fleet security summary"
+      className="label-mono flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 border-b border-border px-4 py-1.5 normal-case"
+    >
+      {body}
+    </section>
+  );
+}
+
 function MapOverlay({ feed, rows }: { feed: PositionFeed; rows: MapRow[] }) {
   let message: string | null = null;
   if (!feed.snapshot)
@@ -297,11 +399,13 @@ function MapOverlay({ feed, rows }: { feed: PositionFeed; rows: MapRow[] }) {
 
 function FilterGroup<T extends string>({
   label,
+  hint,
   options,
   active,
   onChange,
 }: {
   label: string;
+  hint?: string;
   options: T[];
   active: T[];
   onChange: (next: T[]) => void;
@@ -310,7 +414,8 @@ function FilterGroup<T extends string>({
     <div
       className="flex items-center gap-1"
       role="group"
-      aria-label={`Filter by ${label.toLowerCase()}`}
+      aria-label={hint ?? `Filter by ${label.toLowerCase()}`}
+      title={hint}
     >
       <span className="label-mono mr-1">{label}</span>
       {options.map((option) => {
@@ -405,7 +510,7 @@ function VesselDetail({
   const incidents = useSeaShield((s) => s.incidents);
   const events = useSeaShield((s) => s.events);
   const simLog = useSeaShield((s) => s.simLog);
-  const openIncidents = incidents.filter((i) => i.vesselId === row.id && i.status !== "closed");
+  const openIncidents = incidents.filter((i) => i.vesselId === row.id && isOpenIncident(i));
   const latestEvents = events.filter((e) => e.vesselId === row.id).slice(0, 3);
   const logEntries = simLog.filter((entry) => entry.vesselId === row.id).slice(0, 3);
   const context = vesselContext({ row, vessel, dataSource, feed, backendOnline });
@@ -494,14 +599,22 @@ function VesselDetail({
         </Term>
       </dl>
       <Section title={`Open incidents (${openIncidents.length})`}>
-        {openIncidents.slice(0, 4).map((incident) => (
-          <li key={incident.id} className="flex items-center gap-2">
-            <SeverityTag severity={incident.severity} />
-            <Link to="/incidents" className="min-w-0 flex-1 truncate hover:text-signal">
-              {incident.ref} · {incident.title}
-            </Link>
-          </li>
-        ))}
+        {[
+          ...openIncidents
+            .slice(0, PANEL_INCIDENTS)
+            .map((incident) => (
+              <IncidentWithEvidence key={incident.id} incident={incident} events={events} />
+            )),
+          ...(openIncidents.length > PANEL_INCIDENTS
+            ? [
+                <li key="more">
+                  <Link to="/incidents" className="label-mono normal-case hover:text-signal">
+                    +{openIncidents.length - PANEL_INCIDENTS} more on the incidents page →
+                  </Link>
+                </li>,
+              ]
+            : []),
+        ]}
       </Section>
       <Section title="Latest events">
         {latestEvents.map((event) => (
@@ -530,6 +643,68 @@ function VesselDetail({
         </Link>
       </div>
     </Panel>
+  );
+}
+
+const PANEL_INCIDENTS = 4;
+
+/** An open incident with a link to it and the events the backend links as its evidence, including unloaded ones. */
+function IncidentWithEvidence({
+  incident,
+  events,
+}: {
+  incident: Incident;
+  events: SecurityEvent[];
+}) {
+  const evidence = incidentEvidence(incident, events);
+  return (
+    <li>
+      <div className="flex items-center gap-2">
+        <SeverityTag severity={incident.severity} />
+        <Link
+          to="/incidents"
+          search={{ incident: incident.id }}
+          aria-label={`Open incident ${incident.ref}: ${incident.title}`}
+          className="min-w-0 flex-1 truncate hover:text-signal"
+        >
+          {incident.ref} · {incident.title}
+        </Link>
+        <span className="label-mono">{incident.status}</span>
+      </div>
+      {evidence.items.length ? (
+        <details className="mt-1 ml-1 border-l border-border pl-2">
+          <summary className="label-mono cursor-pointer normal-case">
+            Evidence · {evidence.items.length} related event
+            {evidence.items.length === 1 ? "" : "s"}
+            {evidence.notLoaded ? (
+              <span className="text-warning"> · {evidence.notLoaded} not loaded</span>
+            ) : null}
+          </summary>
+          <ul className="mt-1 space-y-0.5">
+            {evidence.items.map((item) =>
+              item.kind === "loaded" ? (
+                <li key={item.event.id} className="flex items-baseline gap-1.5">
+                  <span className="tabular text-muted-foreground">{utcStamp(item.event.ts)}</span>
+                  <span className="min-w-0 flex-1 truncate" title={item.event.detail}>
+                    {item.event.title}
+                  </span>
+                  <span className={cn("label-mono", severityText[item.event.severity])}>
+                    {item.event.severity}
+                  </span>
+                </li>
+              ) : (
+                <li key={item.eventId} className="text-muted-foreground">
+                  <span className="font-mono">{item.eventId}</span> · not among the{" "}
+                  {LOADED_EVENT_LIMIT} most recent events loaded
+                </li>
+              ),
+            )}
+          </ul>
+        </details>
+      ) : (
+        <p className="label-mono mt-1 normal-case">No related events recorded.</p>
+      )}
+    </li>
   );
 }
 

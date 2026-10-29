@@ -26,6 +26,11 @@ export const Route = createFileRoute("/incidents")({
       },
     ],
   }),
+  // Optional: the incident to open first (links from the tactical map's vessel panel).
+  validateSearch: (search: Record<string, unknown>): { incident?: string } => {
+    const incident = search["incident"];
+    return typeof incident === "string" && incident ? { incident } : {};
+  },
   component: IncidentsView,
 });
 
@@ -40,7 +45,8 @@ function IncidentsView() {
   const operator = useSeaShield((s) => s.operator);
 
   const rows = useMemo(() => incidentService.list(scope), [scope, incidents]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const { incident: linkedId } = Route.useSearch();
+  const [selectedId, setSelectedId] = useState<string | null>(linkedId ?? null);
   const [creating, setCreating] = useState(false);
   const [note, setNote] = useState("");
 

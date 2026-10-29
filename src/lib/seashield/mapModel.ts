@@ -72,6 +72,18 @@ export function highestSeverity(severities: Severity[]): Severity | null {
 }
 
 /**
+ * The incident badge on a marker: the open-incident count, coloured by the worst open severity (the same value the
+ * incident filter matches); none without open incidents.
+ */
+export function incidentBadge(
+  vessel: Pick<MapVessel, "openIncidents" | "incidentSeverity">,
+): { count: number; severity: Severity } | null {
+  return vessel.openIncidents > 0 && vessel.incidentSeverity
+    ? { count: vessel.openIncidents, severity: vessel.incidentSeverity }
+    : null;
+}
+
+/**
  * One row per vessel: store vessels in their order, then any vessel only the positions data lists (shown with an
  * unknown status). A vessel without a usable position keeps its reason and gets no marker.
  */
@@ -123,7 +135,10 @@ export function matchesQuery(row: MapRow, query: string): boolean {
   );
 }
 
-/** Rows the filters keep. An empty group means "any"; a freshness filter keeps only vessels with a position. */
+/**
+ * Rows the filters keep. An empty group means "any"; a freshness filter keeps only vessels with a position; the
+ * incident filter matches a vessel's worst open incident only.
+ */
 export function filterRows(rows: MapRow[], filters: MapFilters): MapRow[] {
   return rows.filter(
     (row) =>
