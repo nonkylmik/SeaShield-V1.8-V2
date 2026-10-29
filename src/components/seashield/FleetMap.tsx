@@ -362,13 +362,13 @@ export function FleetMap({
 const LEGEND_STATES: SecurityState[] = ["critical", "warning", "elevated", "secure", "unknown"];
 const LEGEND_SEVERITIES: Severity[] = ["critical", "high", "medium", "low"];
 
-/** What the marker colours, badges and outlines mean; open by default, collapsible so it never hides a marker. */
+/**
+ * What the marker colours, badges and outlines mean. Collapsed by default; when open it stays in the top-left corner,
+ * clear of the zoom controls (right), the caption (bottom) and the map centre, where a selected vessel is centred.
+ */
 function MapLegend() {
   return (
-    <details
-      open
-      className="label-mono absolute right-2 bottom-2 max-w-[19rem] rounded-sm border border-border bg-panel/95 px-2 py-1 normal-case"
-    >
+    <details className="label-mono absolute top-2 left-2 max-h-[45%] max-w-[min(16rem,calc(100%-3.5rem))] overflow-y-auto rounded-sm border border-border bg-panel/95 px-2 py-1 normal-case">
       <summary className="cursor-pointer select-none">Legend</summary>
       <dl className="mt-1 space-y-1.5 pb-0.5">
         <div>

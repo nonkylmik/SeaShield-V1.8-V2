@@ -683,17 +683,22 @@ function IncidentWithEvidence({
           <ul className="mt-1 space-y-0.5">
             {evidence.items.map((item) =>
               item.kind === "loaded" ? (
-                <li key={item.event.id} className="flex items-baseline gap-1.5">
-                  <span className="tabular text-muted-foreground">{utcStamp(item.event.ts)}</span>
-                  <span className="min-w-0 flex-1 truncate" title={item.event.detail}>
+                <li key={item.event.id}>
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="tabular whitespace-nowrap text-muted-foreground">
+                      {utcStamp(item.event.ts)}
+                    </span>
+                    <span className={cn("label-mono shrink-0", severityText[item.event.severity])}>
+                      {item.event.severity}
+                    </span>
+                  </div>
+                  {/* Wraps in full: the panel is narrow and the title is the evidence. */}
+                  <p className="break-words" title={item.event.detail}>
                     {item.event.title}
-                  </span>
-                  <span className={cn("label-mono", severityText[item.event.severity])}>
-                    {item.event.severity}
-                  </span>
+                  </p>
                 </li>
               ) : (
-                <li key={item.eventId} className="text-muted-foreground">
+                <li key={item.eventId} className="break-words text-muted-foreground">
                   <span className="font-mono">{item.eventId}</span> · not among the{" "}
                   {LOADED_EVENT_LIMIT} most recent events loaded
                 </li>
