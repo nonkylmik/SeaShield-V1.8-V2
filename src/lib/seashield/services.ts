@@ -9,8 +9,10 @@ import {
   reopenBackendIncident,
   resetBackendSimulation,
   runBackendScenario,
+  scenarioEventType,
   updateBackendIncident,
 } from "./backend";
+import { canStartInvestigation, inFlightGuard, injectionTarget } from "./operatorActions";
 import { fleetSecurityState, summaryAverage } from "./securityStatus";
 import { describeWriteFailure, optimisticWrite } from "./writeFailures";
 import type {
@@ -45,6 +47,17 @@ const reconcileWithBackend = () =>
 
 const scope = <T extends { vesselId: string }>(rows: T[], vesselId: string | "all") =>
   vesselId === "all" ? rows : rows.filter((r) => r.vesselId === vesselId);
+
+/** Operator actions send at most one request at a time per key (see inFlightGuard). */
+const actionGuard = inFlightGuard();
+
+/** The outcome of an operator action; "busy" when the same action was already in flight and nothing was sent. */
+export type ActionResult =
+  | { status: "done"; message: string }
+  | { status: "failed"; message: string }
+  | { status: "busy" }
+  /** Refused before any request was sent. */
+  | { status: "not-allowed"; message: string };
 
 export const vesselService = {
   list: (): Vessel[] => store.getState().vessels,
@@ -113,6 +126,38 @@ export const incidentService = {
       report: (cause) => reportWriteFailure("Update incident", cause),
       reconcile: reconcileWithBackend,
     }),
+  /**
+   * NEW → INVESTIGATING through the existing incident update, only where canStartInvestigation allows it. One request
+   * per incident at a time; on failure the local change is undone, reported, and the backend state re-read.
+   */
+  startInvestigation: async (id: string): Promise<ActionResult> => {
+    // A repeat while the request is in flight is "busy": the optimistic change already moved it out of NEW.
+    if (actionGuard.isPending(`investigate:${id}`)) return { status: "busy" };
+    const incident = incidentService.get(id);
+    if (!incident || !canStartInvestigation(incident))
+      return {
+        status: "not-allowed",
+        message: "Only a NEW incident can be moved to investigation.",
+      };
+    let failure = "";
+    const attempt = await actionGuard.run(`investigate:${id}`, () =>
+      optimisticWrite({
+        apply: () => store.setIncidentStatus(id, "investigating"),
+        send: () =>
+          updateBackendIncident(id, { status: "investigating" }, store.getState().operator.name),
+        report: (cause) => {
+          failure = describeWriteFailure("Start investigation", cause).description;
+          reportWriteFailure("Start investigation", cause);
+        },
+        reconcile: reconcileWithBackend,
+      }),
+    );
+    if (!attempt.ran) return { status: "busy" };
+    return attempt.value
+      ? { status: "done", message: `${incident.ref} is now under investigation.` }
+      : { status: "failed", message: failure };
+  },
+  isStartingInvestigation: (id: string) => actionGuard.isPending(`investigate:${id}`),
   /** Deliberately reopens a closed incident; not optimistic (the backend reopens its evidence too). */
   reopen: async (id: string, reason: string): Promise<boolean> => {
     try {
@@ -181,6 +226,35 @@ export const simulationService = {
       return null;
     }
   },
+  /** The backend event type a scenario injects, shown before an operator confirms an injection. */
+  eventType: (id: store.ScenarioId): string | null => scenarioEventType(id),
+  /**
+   * Injects one simulated event for one vessel, after the operator confirmed it. While an injection is in flight,
+   * another is refused rather than queued. Never contacts a real vessel: it calls the backend simulation only.
+   */
+  inject: async (id: store.ScenarioId, vesselId: string): Promise<ActionResult> => {
+    const s = store.getState();
+    const target = injectionTarget({
+      selectedVesselId: vesselId,
+      vessels: s.vessels,
+      dataSource: s.dataSource,
+      backend: s.connection.backend,
+    });
+    if (target.kind !== "ready") return { status: "not-allowed", message: target.reason };
+    const attempt = await actionGuard.run("inject", async (): Promise<ActionResult> => {
+      try {
+        return { status: "done", message: await runBackendScenario(id, vesselId) };
+      } catch (cause) {
+        reportWriteFailure("Inject simulated event", cause);
+        return {
+          status: "failed",
+          message: describeWriteFailure("Inject simulated event", cause).description,
+        };
+      }
+    });
+    return attempt.ran ? attempt.value : { status: "busy" };
+  },
+  isInjecting: () => actionGuard.isPending("inject"),
   log: () => store.getState().simLog,
   reset: async (): Promise<boolean> => {
     try {
