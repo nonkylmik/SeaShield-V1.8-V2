@@ -388,6 +388,8 @@ export function buildSeedState(): SeaShieldState {
     fleetAverage: null,
     fleetVesselCount: null,
     lastRefreshAt: null,
+    simulationStatus: null,
+    simulationScenarios: null,
   };
 }
 

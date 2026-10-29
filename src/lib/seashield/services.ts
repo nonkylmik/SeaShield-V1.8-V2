@@ -5,16 +5,20 @@ import {
   addBackendIncidentNote,
   createBackendIncident,
   fetchVesselPositions,
+  nextBackendScenarioStep,
   refreshSeaShieldBackend,
   reopenBackendIncident,
   resetBackendSimulation,
   runBackendScenario,
   scenarioEventType,
+  startBackendScenario,
+  stopBackendSimulation,
   updateBackendIncident,
 } from "./backend";
 import { canStartInvestigation, inFlightGuard, injectionTarget } from "./operatorActions";
 import { fleetSecurityState, summaryAverage } from "./securityStatus";
-import { describeWriteFailure, optimisticWrite } from "./writeFailures";
+import { stepOutcome } from "./simulationControls";
+import { ApiRequestError, describeWriteFailure, optimisticWrite } from "./writeFailures";
 import type {
   AccessRecord,
   Camera,
@@ -58,6 +62,39 @@ export type ActionResult =
   | { status: "busy" }
   /** Refused before any request was sent. */
   | { status: "not-allowed"; message: string };
+
+const vesselNameOf = (id: string) =>
+  store.getState().vessels.find((vessel) => vessel.id === id)?.name ?? id;
+
+/**
+ * One scenario control request at a time (start, next step, stop, reset). On failure the backend's reason is shown
+ * and its state re-read. A failed simulation request may still have saved part of its work (a step's event commits
+ * before its incident), so the message never claims that nothing changed.
+ */
+async function simulationControl(
+  action: string,
+  send: () => Promise<string>,
+): Promise<ActionResult> {
+  const attempt = await actionGuard.run("simulation", async (): Promise<ActionResult> => {
+    try {
+      return { status: "done", message: await send() };
+    } catch (cause) {
+      const reason =
+        cause instanceof ApiRequestError
+          ? cause.message
+          : cause instanceof TypeError
+            ? "The backend could not be reached"
+            : cause instanceof Error && cause.message
+              ? cause.message
+              : "The request failed";
+      const message = `${reason}. The status shown is re-read from the backend.`;
+      toast.error(`${action} failed`, { description: message });
+      await reconcileWithBackend();
+      return { status: "failed", message };
+    }
+  });
+  return attempt.ran ? attempt.value : { status: "busy" };
+}
 
 export const vesselService = {
   list: (): Vessel[] => store.getState().vessels,
@@ -255,6 +292,36 @@ export const simulationService = {
     return attempt.ran ? attempt.value : { status: "busy" };
   },
   isInjecting: () => actionGuard.isPending("inject"),
+  /** Starts a scenario the backend listed; its first step runs immediately. */
+  startScenario: async (key: string): Promise<ActionResult> => {
+    const scenario = store.getState().simulationScenarios?.find((item) => item.key === key);
+    if (!scenario)
+      return {
+        status: "not-allowed",
+        message: "This scenario is not in the backend's scenario list.",
+      };
+    return simulationControl("Start scenario", async () => {
+      const response = await startBackendScenario(key);
+      return `Started ${scenario.label}. ${stepOutcome(response.result, vesselNameOf)}`;
+    });
+  },
+  /** Runs one step of the running scenario; a step runs only on request (there is no simulation clock). */
+  nextStep: (): Promise<ActionResult> =>
+    simulationControl("Run next step", async () =>
+      stepOutcome(await nextBackendScenarioStep(), vesselNameOf),
+    ),
+  stopScenario: (): Promise<ActionResult> =>
+    simulationControl("Stop scenario", async () => {
+      await stopBackendSimulation();
+      return "Scenario stopped. The events its steps generated remain in the simulation.";
+    }),
+  /** Fleet-wide: resolves every open event and closes every open incident. Offered only after confirmation. */
+  resetConfirmed: (): Promise<ActionResult> =>
+    simulationControl("Reset simulation", async () => {
+      await resetBackendSimulation();
+      return "Simulation reset: open events resolved and open incidents closed across the fleet.";
+    }),
+  isControlling: () => actionGuard.isPending("simulation"),
   log: () => store.getState().simLog,
   reset: async (): Promise<boolean> => {
     try {

@@ -1,3 +1,5 @@
+import type { ScenarioDefinition, SimulationStatus } from "./simulationControls";
+
 export type Severity = "critical" | "high" | "medium" | "low" | "info";
 
 // "unknown": the backend sent no recognisable status (see securityStatus.ts).
@@ -230,4 +232,8 @@ export interface SeaShieldState {
   fleetVesselCount: number | null;
   /** Wall-clock time (ms) the last full backend refresh was applied; null until one has been. */
   lastRefreshAt: number | null;
+  /** GET /api/v1/simulation/status from the last refresh; null until read, or when it could not be read. */
+  simulationStatus: SimulationStatus | null;
+  /** GET /api/v1/simulation/scenarios from the last refresh; null until read, or when it could not be read. */
+  simulationScenarios: ScenarioDefinition[] | null;
 }

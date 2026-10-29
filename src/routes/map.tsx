@@ -638,7 +638,7 @@ function VesselDetail({
           </li>
         ))}
       </Section>
-      <SimulatedInjection />
+      <SimulatedInjection vesselId={row.id} />
       <div className="border-t border-border px-3 py-2">
         <Link
           to={context.detailLink.to}

@@ -3,6 +3,7 @@ import { uiAllowedStatuses } from "./incidentTransitions";
 import { LOADED_EVENT_LIMIT } from "./mapOverview";
 import { parsePositionsResponse, type PositionsSnapshot } from "./positions";
 import { securityStateFromApi } from "./securityStatus";
+import { parseScenarios, parseSimulationStatus } from "./simulationControls";
 import { simulationLogOutcome, type ApiSimulationLogEntry } from "./simulationLog";
 import { ApiRequestError, errorDetail } from "./writeFailures";
 import { appendSafetyRounds, hydrateFromBackend, setOperator } from "./store";
@@ -157,6 +158,8 @@ export async function refreshSeaShieldBackend() {
     safetyRounds,
     safetyFindings,
     simulationLog,
+    simulationStatus,
+    simulationScenarios,
   ] = await Promise.all([
     request<{ status: string }>("/health"),
     request<ApiVessel[]>("/api/v1/vessels"),
@@ -168,6 +171,9 @@ export async function refreshSeaShieldBackend() {
     request<SafetyFinding[]>("/api/v1/safety-findings?limit=100"),
     // Supplementary: if only the log fails, the rest of the refresh still applies (null = unavailable).
     request<ApiSimulationLogEntry[]>("/api/v1/simulation/log?limit=40").catch(() => null),
+    // Supplementary as well: an unreadable status or scenario list is shown as unavailable, never guessed.
+    request<unknown>("/api/v1/simulation/status").catch(() => null),
+    request<unknown>("/api/v1/simulation/scenarios").catch(() => null),
   ]);
   if (sequence !== refreshSequence) return;
   hydrateFromBackend({
@@ -267,6 +273,8 @@ export async function refreshSeaShieldBackend() {
     fleetVesselCount:
       Number.isInteger(fleet.vessel_count) && fleet.vessel_count >= 0 ? fleet.vessel_count : null,
     refreshedAt: Date.now(),
+    simulationStatus: parseSimulationStatus(simulationStatus),
+    simulationScenarios: parseScenarios(simulationScenarios),
   });
 }
 
@@ -425,6 +433,25 @@ export async function runBackendScenario(uiScenario: string, vesselId: string) {
   return result.correlation
     ? `${eventType.replaceAll("_", " ")} injected · correlated: ${result.correlation.title}`
     : `${eventType.replaceAll("_", " ")} injected for ${vesselId}.`;
+}
+/** Starts a scripted scenario; the backend runs its first step immediately and returns it as `result`. */
+export async function startBackendScenario(key: string) {
+  const response = await request<{ status: string; result: unknown }>("/api/v1/simulation/start", {
+    method: "POST",
+    body: JSON.stringify({ scenario: key }),
+  });
+  await refreshAfterWrite();
+  return response;
+}
+/** Runs the active scenario's next step: the step's { event, correlation }, or null when no scenario is running. */
+export async function nextBackendScenarioStep() {
+  const result = await request<unknown>("/api/v1/simulation/next", { method: "POST" });
+  await refreshAfterWrite();
+  return result;
+}
+export async function stopBackendSimulation() {
+  await request("/api/v1/simulation/stop", { method: "POST" });
+  await refreshAfterWrite();
 }
 export async function resetBackendSimulation() {
   await request("/api/v1/simulation/reset", { method: "POST" });
