@@ -3,6 +3,11 @@ import { RadioTower, Search, X } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { FleetMap, type CenterRequest } from "@/components/seashield/FleetMap";
 import {
+  SimulatedInjection,
+  StartInvestigation,
+  VesselCameras,
+} from "@/components/seashield/OperatorActions";
+import {
   PageHeader,
   Panel,
   ScoreBar,
@@ -616,6 +621,7 @@ function VesselDetail({
             : []),
         ]}
       </Section>
+      <VesselCameras vesselId={row.id} />
       <Section title="Latest events">
         {latestEvents.map((event) => (
           <li key={event.id} className="truncate">
@@ -632,6 +638,7 @@ function VesselDetail({
           </li>
         ))}
       </Section>
+      <SimulatedInjection />
       <div className="border-t border-border px-3 py-2">
         <Link
           to={context.detailLink.to}
@@ -671,6 +678,7 @@ function IncidentWithEvidence({
         </Link>
         <span className="label-mono">{incident.status}</span>
       </div>
+      <StartInvestigation incident={incident} />
       {evidence.items.length ? (
         <details className="mt-1 ml-1 border-l border-border pl-2">
           <summary className="label-mono cursor-pointer normal-case">

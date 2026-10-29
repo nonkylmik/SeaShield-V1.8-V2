@@ -410,6 +410,10 @@ const scenarioEventMap: Record<string, string> = {
   "sensor-failure": "SENSOR_FAILURE",
   "fire-alarm": "FIRE_ALARM",
 };
+/** The backend event type a UI scenario injects (POST /api/v1/simulation/inject), or null when none is mapped. */
+export function scenarioEventType(uiScenario: string): string | null {
+  return scenarioEventMap[uiScenario] ?? null;
+}
 export async function runBackendScenario(uiScenario: string, vesselId: string) {
   const eventType = scenarioEventMap[uiScenario];
   if (!eventType) throw new Error(`No backend event is mapped to ${uiScenario}.`);
