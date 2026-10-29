@@ -1,3 +1,4 @@
+from contextlib import nullcontext
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -45,6 +46,7 @@ from models.safety_rounds import SafetyCheckpointPatch, SafetyCheckpointStatus, 
 from models.security_status import average_score, status_for_score
 from schemas.auth import LoginRequest, LoginResponse, UserResponse
 from schemas.security_events import EventAcknowledge, SecurityEventCreate, SecurityEventResponse
+from schemas.simulation import SimulationScenarioResponse, scenario_response
 from schemas.vessels import VesselResponse, vessel_response
 from simulation.scenario_manager import MANUAL_INJECTION, SCENARIOS
 from simulation.simulation_engine import SimulationEngine
@@ -198,9 +200,14 @@ def commit_with_engine_sync(db: Session) -> None:
 
 
 def rollback_and_resync_engine(db: Session) -> None:
-    """Discard the session's uncommitted changes and rebuild the engine from committed state, without notifying."""
+    """Discard the session's uncommitted changes and rebuild the engine from committed state, without notifying.
+
+    Inside an outer deferred block (a simulation step or injection) the rebuild's notifications are held with that
+    block's, which drops them all when the failure propagates.
+    """
     db.rollback()
-    with engine.deferred_notifications(publish=False), SessionLocal() as recovery:
+    held = nullcontext() if engine.notifications_deferred else engine.deferred_notifications(publish=False)
+    with held, SessionLocal() as recovery:
         sync_engine_from_db(recovery)
 
 
@@ -457,7 +464,10 @@ def get_events(vessel_id: str | None = None, db: Session = Depends(get_db)):
 
 
 def persist_tick(db: Session):
-    return persist_result(db, engine.tick(), engine.scenarios.name)
+    # The step's notifications (event, incident, score changes) are held until its writes have committed, and
+    # dropped if any of them fails.
+    with engine.deferred_notifications():
+        return persist_result(db, engine.tick(), engine.scenarios.name)
 
 
 def persist_result(db: Session, result, scenario: str | None):
@@ -699,6 +709,13 @@ async def create_incident_note(incident_id: str, payload: IncidentNoteCreate, db
 @app.get("/api/v1/simulation/status")
 def simulation_status():
     return {"scenario": engine.scenarios.name, "status": engine.scenarios.status, "index": engine.scenarios.index}
+
+
+@app.get("/api/v1/simulation/scenarios", response_model=list[SimulationScenarioResponse])
+def simulation_scenarios(db: Session = Depends(get_db)):
+    """The scripted scenarios POST /api/v1/simulation/start accepts, in a fixed order. Read-only."""
+    vessel_names = {vessel.id: vessel.name for vessel in current_vessels(db)}
+    return [scenario_response(key, scenario, vessel_names.get(scenario.vessel_id)) for key, scenario in SCENARIOS.items()]
 
 
 @app.get("/api/v1/simulation/log")
@@ -1123,11 +1140,13 @@ async def websocket_security(websocket: WebSocket):
 async def start_simulation(request: ScenarioRequest, db: Session = Depends(get_db)):
     try:
         engine.start(request.scenario)
-        await broadcast_status_message("simulation_status", {"scenario": engine.scenarios.name, "status": engine.scenarios.status.value, "index": engine.scenarios.index})
-        await broadcast_status_message("notification", {"title": "Simulation started", "message": f"{engine.scenarios.name} started.", "severity": "INFO"})
-        return {"status": engine.scenarios.status, "result": persist_tick(db)}
+        result = persist_tick(db)
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
+    # Announced only once the first step has been committed.
+    await broadcast_status_message("simulation_status", {"scenario": engine.scenarios.name, "status": engine.scenarios.status.value, "index": engine.scenarios.index})
+    await broadcast_status_message("notification", {"title": "Simulation started", "message": f"{engine.scenarios.name} started.", "severity": "INFO"})
+    return {"status": engine.scenarios.status, "result": result}
 
 
 @app.post("/simulation/tick")
@@ -1138,13 +1157,15 @@ async def next_simulation_step(db: Session = Depends(get_db)):
 
 @app.post("/api/v1/simulation/inject")
 async def inject_simulation_event(payload: InjectEventRequest, db: Session = Depends(get_db)):
-    try:
-        result = engine.inject(payload.vessel_id, payload.event_type)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="Vessel not found") from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return persist_result(db, result, MANUAL_INJECTION)
+    # As for a step: notifications are sent only once the injection's writes have committed.
+    with engine.deferred_notifications():
+        try:
+            result = engine.inject(payload.vessel_id, payload.event_type)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Vessel not found") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return persist_result(db, result, MANUAL_INJECTION)
 
 
 @app.post("/simulation/pause")
